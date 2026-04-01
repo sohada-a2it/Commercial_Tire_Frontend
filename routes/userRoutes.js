@@ -5,6 +5,7 @@ const {
   getUserProfile,
   updateUserProfile,
   getAllUsers,
+  deleteUser,
 } = require("../controllers/userController");
 
 // POST /api/users/register - Register or update user
@@ -18,5 +19,8 @@ router.get("/profile/:firebaseUid", getUserProfile);
 
 // PUT /api/users/profile/:firebaseUid - Update user profile
 router.put("/profile/:firebaseUid", updateUserProfile);
+
+// DELETE /api/users/:firebaseUid - Delete user
+router.delete("/:firebaseUid", deleteUser);
 
 module.exports = router;

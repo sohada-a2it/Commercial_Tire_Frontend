@@ -289,9 +289,50 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+// Delete user by Firebase UID
+const deleteUser = async (req, res) => {
+  try {
+    const { firebaseUid } = req.params;
+
+    if (!firebaseUid) {
+      return res.status(400).json({
+        success: false,
+        message: "Firebase UID is required",
+      });
+    }
+
+    const deletedUser = await User.findOneAndDelete({ firebaseUid });
+
+    if (!deletedUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "User deleted successfully",
+      user: {
+        id: deletedUser._id,
+        firebaseUid: deletedUser.firebaseUid,
+        email: deletedUser.email,
+      },
+    });
+  } catch (error) {
+    console.error("Delete user error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error deleting user",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   getUserProfile,
   updateUserProfile,
   getAllUsers,
+  deleteUser,
 };

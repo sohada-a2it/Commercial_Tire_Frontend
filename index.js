@@ -2,12 +2,20 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
+const connectDB = require("./config/db");
+const userRoutes = require("./routes/userRoutes");
 
 const app = express();
+
+// Connect to MongoDB
+connectDB();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// User routes
+app.use("/api/users", userRoutes);
 
 // Email endpoint
 app.post("/api/send-email", async (req, res) => {
@@ -174,7 +182,7 @@ app.post("/api/send-email", async (req, res) => {
 
     await transporter.sendMail({
       from: `"Product Inquiry" <${process.env.SMTP_USER}>`,
-      to: type === "product_inquiry" ? "sale@asianimportexport.com" : "info@asianimportexport.com",
+      to: type === "product_inquiry" ? "naimaa2it@gmail.com" : "naimaa2it@gmail.com",
       subject: emailSubject,
       text: textContent,
       html: htmlContent,
@@ -411,7 +419,7 @@ app.post("/api/send-invoice", async (req, res) => {
     // Send email to sales (admin)
     await transporter.sendMail({
       from: `"Website Orders" <${process.env.SMTP_USER}>`,
-      to: "sale@asianimportexport.com",
+      to: "naimaa2it@gmail.com",
       subject: `🔔 New Order Received - ${orderId} - $${total.toFixed(2)}`,
       html: adminEmailHTML,
     });

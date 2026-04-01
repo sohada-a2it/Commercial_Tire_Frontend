@@ -12,6 +12,7 @@ const registerUser = async (req, res) => {
       country,
       provider,
       photoURL,
+      businessType,
     } = req.body;
 
     // Validate required fields
@@ -32,6 +33,7 @@ const registerUser = async (req, res) => {
       user.whatsappNumber = whatsappNumber || user.whatsappNumber;
       user.country = country || user.country;
       user.photoURL = photoURL || user.photoURL;
+      user.businessType = businessType || user.businessType;
       if (provider) user.provider = provider;
 
       await user.save();
@@ -49,6 +51,8 @@ const registerUser = async (req, res) => {
           country: user.country,
           provider: user.provider,
           photoURL: user.photoURL,
+          businessType: user.businessType,
+          role: user.role,
         },
       });
     }
@@ -72,6 +76,7 @@ const registerUser = async (req, res) => {
       country,
       provider: provider || "email",
       photoURL,
+      businessType,
     });
 
     await user.save();
@@ -89,6 +94,8 @@ const registerUser = async (req, res) => {
         country: user.country,
         provider: user.provider,
         photoURL: user.photoURL,
+        businessType: user.businessType,
+        role: user.role,
       },
     });
   } catch (error) {
@@ -134,6 +141,8 @@ const getUserProfile = async (req, res) => {
         country: user.country,
         provider: user.provider,
         photoURL: user.photoURL,
+        businessType: user.businessType,
+        role: user.role,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
@@ -152,7 +161,7 @@ const getUserProfile = async (req, res) => {
 const updateUserProfile = async (req, res) => {
   try {
     const { firebaseUid } = req.params;
-    const { companyName, fullName, whatsappNumber, country, photoURL } = req.body;
+    const { companyName, fullName, whatsappNumber, country, photoURL, businessType } = req.body;
 
     if (!firebaseUid) {
       return res.status(400).json({
@@ -176,6 +185,7 @@ const updateUserProfile = async (req, res) => {
     if (whatsappNumber !== undefined) user.whatsappNumber = whatsappNumber;
     if (country !== undefined) user.country = country;
     if (photoURL !== undefined) user.photoURL = photoURL;
+    if (businessType !== undefined) user.businessType = businessType;
 
     await user.save();
 
@@ -192,6 +202,8 @@ const updateUserProfile = async (req, res) => {
         country: user.country,
         provider: user.provider,
         photoURL: user.photoURL,
+        businessType: user.businessType,
+        role: user.role,
       },
     });
   } catch (error) {
@@ -204,8 +216,82 @@ const updateUserProfile = async (req, res) => {
   }
 };
 
+// Get all users (for admin dashboard)
+const getAllUsers = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = "", country = "", businessType = "" } = req.query;
+
+    // Build query
+    const query = {};
+
+    // Search by name, email, company
+    if (search) {
+      query.$or = [
+        { fullName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { companyName: { $regex: search, $options: "i" } },
+        { whatsappNumber: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Filter by country
+    if (country) {
+      query.country = country;
+    }
+
+    // Filter by business type
+    if (businessType) {
+      query.businessType = businessType;
+    }
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get users with pagination
+    const users = await User.find(query)
+      .select("-__v")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Get total count for pagination
+    const total = await User.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(total / parseInt(limit)),
+      users: users.map((user) => ({
+        id: user._id,
+        firebaseUid: user.firebaseUid,
+        companyName: user.companyName || "N/A",
+        fullName: user.fullName,
+        email: user.email,
+        whatsappNumber: user.whatsappNumber || "Not provided",
+        country: user.country || "Not specified",
+        businessType: user.businessType || "Other",
+        provider: user.provider,
+        photoURL: user.photoURL,
+        role: user.role,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Get all users error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching users",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   getUserProfile,
   updateUserProfile,
+  getAllUsers,
 };

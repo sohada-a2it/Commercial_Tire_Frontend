@@ -39,6 +39,16 @@ const userSchema = new mongoose.Schema(
     photoURL: {
       type: String,
     },
+    role: {
+      type: String,
+      enum: ["user", "admin"],
+      default: "user",
+    },
+    businessType: {
+      type: String,
+      enum: ["Wholesaler", "Retailer", "Other"],
+      trim: true,
+    },
   },
   {
     timestamps: true,

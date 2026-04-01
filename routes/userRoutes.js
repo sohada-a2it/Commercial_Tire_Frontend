@@ -4,10 +4,14 @@ const {
   registerUser,
   getUserProfile,
   updateUserProfile,
+  getAllUsers,
 } = require("../controllers/userController");
 
 // POST /api/users/register - Register or update user
 router.post("/register", registerUser);
+
+// GET /api/users - Get all users (for dashboard)
+router.get("/", getAllUsers);
 
 // GET /api/users/profile/:firebaseUid - Get user profile
 router.get("/profile/:firebaseUid", getUserProfile);

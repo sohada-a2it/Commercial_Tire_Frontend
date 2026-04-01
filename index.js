@@ -11,7 +11,27 @@ const app = express();
 connectDB();
 
 // Middleware
-app.use(cors());
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "https://asianimportexport.com",
+  "https://www.asianimportexport.com",
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow requests from non-browser clients (no Origin header)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // User routes
@@ -436,5 +456,10 @@ app.post("/api/send-invoice", async (req, res) => {
 });
 
 // Server
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const PORT = process.env.PORT || 5000;
+
+if (process.env.VERCEL !== "1") {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}
+
+module.exports = app;

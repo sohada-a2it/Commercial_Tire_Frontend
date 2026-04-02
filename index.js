@@ -3,12 +3,14 @@ const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 const connectDB = require("./config/db");
+const seedDefaultAdmin = require("./config/seedDefaultAdmin");
 const userRoutes = require("./routes/userRoutes");
 
 const app = express();
 
 // Connect to MongoDB
 connectDB();
+seedDefaultAdmin();
 
 // Middleware
 const allowedOrigins = [

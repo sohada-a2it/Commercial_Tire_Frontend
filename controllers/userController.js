@@ -2,6 +2,7 @@ const User = require("../models/User");
 const AuthorizedPerson = require("../models/AuthorizedPerson");
 const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
 
 const ALLOWED_BUSINESS_TYPES = [
   "Wholeseller",
@@ -50,6 +51,20 @@ const findAuthorizedPersonByIdentifier = async (identifier) => {
   }
 
   return AuthorizedPerson.findOne({ $or: query });
+};
+
+const createAuthorizedJwt = (authorizedPerson) => {
+  const secret = process.env.JWT_SECRET || "local-dev-jwt-secret";
+  return jwt.sign(
+    {
+      sub: String(authorizedPerson._id),
+      role: authorizedPerson.role,
+      type: "authorized",
+      email: authorizedPerson.email,
+    },
+    secret,
+    { expiresIn: "7d" }
+  );
 };
 
 // Register or update user after Firebase authentication
@@ -158,7 +173,7 @@ const getUserProfile = async (req, res) => {
       });
     }
 
-    const authorizedPerson = await AuthorizedPerson.findOne({ firebaseUid });
+    const authorizedPerson = await findAuthorizedPersonByIdentifier(firebaseUid);
     const customer = !authorizedPerson
       ? await User.findOne({ firebaseUid })
       : null;
@@ -206,7 +221,7 @@ const updateUserProfile = async (req, res) => {
       });
     }
 
-    const authorizedPerson = await AuthorizedPerson.findOne({ firebaseUid });
+    const authorizedPerson = await findAuthorizedPersonByIdentifier(firebaseUid);
     const user = !authorizedPerson
       ? await User.findOne({ firebaseUid })
       : null;
@@ -557,6 +572,54 @@ const deleteAuthorizedPerson = async (req, res) => {
   }
 };
 
+const loginAuthorizedPerson = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const normalizedEmail = email?.toLowerCase().trim();
+
+    if (!normalizedEmail || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    const authorizedPerson = await AuthorizedPerson.findOne({
+      email: normalizedEmail,
+    });
+
+    if (!authorizedPerson || !authorizedPerson.passwordHash) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
+    }
+
+    const matched = await bcrypt.compare(password, authorizedPerson.passwordHash);
+    if (!matched) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
+    }
+
+    const token = createAuthorizedJwt(authorizedPerson);
+
+    return res.status(200).json({
+      success: true,
+      message: "Authorized login successful",
+      token,
+      user: mapAuthorizedPayload(authorizedPerson),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to login authorized person",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   getUserProfile,
@@ -567,4 +630,5 @@ module.exports = {
   createAuthorizedPerson,
   updateAuthorizedPerson,
   deleteAuthorizedPerson,
+  loginAuthorizedPerson,
 };

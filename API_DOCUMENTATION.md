@@ -1,41 +1,58 @@
 # Asian Import Export Co Backend API Documentation
 
-Last updated: April 1, 2026
+Last updated: April 2, 2026
 
 ## 1) Overview
 
 This backend is an Express + MongoDB API that supports:
-- User profile persistence for Firebase-authenticated users
+- Customer profile persistence for Firebase-authenticated customers
+- Admin-protected dashboard APIs
+- Database-only authorized-person management (admin/moderator)
 - Customer inquiry email delivery
 - Order invoice email delivery
 
-Authentication for end users (email/password and Google) is handled by Firebase in the frontend. The backend stores and manages user profile records by Firebase UID.
-
 Base URL examples:
 - Local: http://localhost:5000
-- Production: your deployed backend domain (for example Vercel URL)
+- Production: your deployed backend domain
 
 ## 2) Tech Stack
 
 - Node.js + Express
 - MongoDB + Mongoose
 - Nodemailer (SMTP)
-- CORS enabled with allowlist
+- Firebase Admin SDK support (optional in current fallback mode)
+- CORS with allowlist
 
-## 3) Runtime and Environment Variables
+## 3) Environment Variables
 
-Required for backend:
-- PORT (optional, defaults to 5000)
+Core:
+- PORT (optional, default 5000)
 - MONGODB_URI (required)
-- SMTP_HOST (optional, defaults to smtp.hostinger.com)
-- SMTP_PORT (optional, defaults to 465)
-- SMTP_USER (required for email sending)
-- SMTP_PASSWORD (required for email sending)
-- OWNER_EMAIL (optional fallback in templates)
-- FRONTEND_URL (optional, added to CORS allowlist)
+- FRONTEND_URL (optional, CORS allowlist)
+
+Email:
+- SMTP_HOST
+- SMTP_PORT
+- SMTP_USER
+- SMTP_PASSWORD
+- OWNER_EMAIL
+
+Auth/Firebase fallback:
+- FIREBASE_WEB_API_KEY (used by auth fallback middleware)
+
+Optional Firebase Admin credential options:
+- FIREBASE_SERVICE_ACCOUNT_JSON
+- FIREBASE_SERVICE_ACCOUNT_BASE64
+- FIREBASE_PROJECT_ID + FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY
+- GOOGLE_APPLICATION_CREDENTIALS
+
+Default admin seed values:
+- DEFAULT_ADMIN_NAME
+- DEFAULT_ADMIN_EMAIL
+- DEFAULT_ADMIN_PASSWORD
 
 Frontend environment expected:
-- NEXT_PUBLIC_BACKEND_URL (for calling this backend)
+- NEXT_PUBLIC_BACKEND_URL
 
 ## 4) CORS Policy
 
@@ -46,366 +63,250 @@ Allowed origins include:
 - https://asianimportexport.com
 - https://www.asianimportexport.com
 
-Methods allowed:
+Allowed methods:
 - GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD
 
-Headers allowed:
+Allowed headers:
 - Content-Type, Authorization
 
-## 5) Data Model
+## 5) Data Models
 
-### User
+### 5.1 Customer User
 
 Collection: users
 
+Used for customer data only.
+
 Fields:
 - firebaseUid: string, required, unique
-- companyName: string, optional
+- companyName: string
 - fullName: string, required
 - email: string, required, unique, lowercase
-- whatsappNumber: string, optional
-- country: string, optional
+- whatsappNumber: string
+- country: string
 - provider: enum(email, google), default email
-- photoURL: string, optional
-- role: enum(user, admin), default user
-- businessType: enum(Wholesaler, Retailer, Other), optional
-- createdAt: date (auto)
-- updatedAt: date (auto)
+- photoURL: string
+- role: enum(customer, admin, moderator, user), current customer flows store customer/user
+- businessType: enum(Wholeseller, Wholesaler, Retailer, REGULAR USER, Other)
+- createdAt, updatedAt
 
-Indexes:
-- email
-- firebaseUid
+### 5.2 Authorized Person
 
-## 6) API Endpoint Index (A to Z)
+Collection: authorizedpeople
 
-- GET /api/users
+Used for admin/moderator records in dashboard/authorized-persons.
+
+Important:
+- This CRUD is database-only and does not require Firebase for create/update/delete.
+- firebaseUid is optional/sparse in this model.
+
+Fields:
+- firebaseUid: string, optional, unique sparse
+- fullName: string, required
+- email: string, required, unique, lowercase
+- provider: enum(email, google), default email
+- photoURL: string
+- role: enum(admin, moderator), required
+- passwordHash: string
+- createdAt, updatedAt
+
+## 6) Authentication and Authorization
+
+Middleware:
+- authenticate: verifies bearer token
+  - Uses Firebase Admin token verification if configured
+  - Falls back to Firebase Identity Toolkit lookup using FIREBASE_WEB_API_KEY
+- requireAdmin: allows only role=admin
+
+Protected endpoints require:
+- Authorization: Bearer <firebase_id_token>
+
+## 7) Endpoint Index
+
+- POST /api/users/register
 - GET /api/users/profile/:firebaseUid
+- PUT /api/users/profile/:firebaseUid
+- GET /api/users
+- DELETE /api/users/customers/:firebaseUid
+- GET /api/users/authorized-persons
+- POST /api/users/authorized-persons
+- PUT /api/users/authorized-persons/:firebaseUid
+- DELETE /api/users/authorized-persons/:firebaseUid
 - POST /api/send-email
 - POST /api/send-invoice
-- POST /api/users/register
-- PUT /api/users/profile/:firebaseUid
-- DELETE /api/users/:firebaseUid
 
-## 7) User APIs (Full CRUD)
+## 8) User and Authorized Person APIs
 
-### 7.1 Create or Upsert User
+### 8.1 Register/Upsert Customer
 
 Endpoint:
 - POST /api/users/register
 
 Description:
-- Creates a new user if firebaseUid does not exist.
-- If firebaseUid exists, updates that existing user (upsert-style behavior).
+- Creates or updates a customer user by firebaseUid.
 
 Request body:
-- firebaseUid: string (required)
-- email: string (required)
-- fullName: string (required)
-- companyName: string (optional)
-- whatsappNumber: string (optional)
-- country: string (optional)
-- provider: email | google (optional)
-- photoURL: string (optional)
-- businessType: Wholesaler | Retailer | Other (optional)
+- firebaseUid (required)
+- email (required)
+- fullName (required)
+- companyName, whatsappNumber, country, provider, photoURL, businessType (optional)
 
-Success responses:
-- 201 Created (new user)
-- 200 OK (existing user updated)
+Responses:
+- 201 created
+- 200 updated
+- 400 validation errors
+- 500 server errors
 
-Example success payload:
-{
-  "success": true,
-  "message": "User registered successfully",
-  "user": {
-    "id": "...",
-    "firebaseUid": "...",
-    "companyName": "...",
-    "fullName": "...",
-    "email": "...",
-    "whatsappNumber": "...",
-    "country": "...",
-    "provider": "google",
-    "photoURL": "...",
-    "businessType": "Wholesaler",
-    "role": "user"
-  }
-}
+### 8.2 Get Profile by Firebase UID
 
-Error responses:
-- 400 if required fields are missing
-- 400 if email already exists for different firebaseUid
-- 500 on server/database errors
+Endpoint:
+- GET /api/users/profile/:firebaseUid
 
-### 7.2 Read All Users (with search/filter/pagination)
+Description:
+- Returns authorized-person profile first if matching firebaseUid exists.
+- Otherwise returns customer profile.
+
+Responses:
+- 200 success
+- 404 not found
+
+### 8.3 Update Profile by Firebase UID
+
+Endpoint:
+- PUT /api/users/profile/:firebaseUid
+
+Description:
+- If firebaseUid belongs to authorized person, updates authorized-person profile fields.
+- Else updates customer profile fields.
+
+### 8.4 Get Customers (Admin only)
 
 Endpoint:
 - GET /api/users
+
+Auth:
+- Required (authenticate + requireAdmin)
 
 Query params:
-- page: number (default 1)
-- limit: number (default 10)
-- search: string (default empty)
-- country: string (default empty)
-- businessType: string (default empty)
+- page, limit, search, country, businessType, role(customer|user)
+
+Description:
+- Returns customer records from users collection.
+
+### 8.5 Delete Customer (Admin only)
+
+Endpoint:
+- DELETE /api/users/customers/:firebaseUid
+
+Auth:
+- Required (authenticate + requireAdmin)
+
+Description:
+- Deletes customer from users collection.
+
+### 8.6 Get Authorized Persons (Admin only)
+
+Endpoint:
+- GET /api/users/authorized-persons
+
+Auth:
+- Required (authenticate + requireAdmin)
+
+Description:
+- Returns admin/moderator records from authorizedpeople collection.
+
+### 8.7 Create Authorized Person (Admin only, DB-only)
+
+Endpoint:
+- POST /api/users/authorized-persons
+
+Auth:
+- Required (authenticate + requireAdmin)
+
+Request body:
+- fullName (required)
+- email (required)
+- password (required)
+- role (required: admin|moderator)
 
 Behavior:
-- search matches fullName, email, companyName, whatsappNumber (case-insensitive regex)
-- results sorted by createdAt descending
+- Stores authorized person in DB with passwordHash.
+- No Firebase create call is required for this flow.
 
-Success response:
-- 200 OK
-
-Example response:
-{
-  "success": true,
-  "total": 54,
-  "page": 1,
-  "limit": 10,
-  "totalPages": 6,
-  "users": [
-    {
-      "id": "...",
-      "firebaseUid": "...",
-      "companyName": "N/A",
-      "fullName": "John Doe",
-      "email": "john@example.com",
-      "whatsappNumber": "Not provided",
-      "country": "Not specified",
-      "businessType": "Other",
-      "provider": "email",
-      "photoURL": "...",
-      "role": "user",
-      "createdAt": "...",
-      "updatedAt": "..."
-    }
-  ]
-}
-
-Error responses:
-- 500 on query failure
-
-### 7.3 Read Single User Profile
+### 8.8 Update Authorized Person (Admin only, DB-only)
 
 Endpoint:
-- GET /api/users/profile/:firebaseUid
+- PUT /api/users/authorized-persons/:firebaseUid
 
-Path params:
-- firebaseUid: string (required)
+Auth:
+- Required (authenticate + requireAdmin)
 
-Success response:
-- 200 OK
+Path param supports:
+- firebaseUid (if present)
+- or Mongo _id (frontend fallback for DB-only records)
 
-Error responses:
-- 400 if firebaseUid is missing
-- 404 if user not found
-- 500 on server/database errors
+Request body:
+- fullName, email, role, password (optional)
 
-### 7.4 Update User Profile
+Behavior:
+- Updates DB record only.
+- If password provided, updates passwordHash.
 
-Endpoint:
-- PUT /api/users/profile/:firebaseUid
-
-Path params:
-- firebaseUid: string (required)
-
-Request body (all optional, only provided fields are updated):
-- companyName
-- fullName
-- whatsappNumber
-- country
-- photoURL
-- businessType
-
-Success response:
-- 200 OK
-
-Error responses:
-- 400 if firebaseUid missing
-- 404 if user not found
-- 500 on server/database errors
-
-### 7.5 Delete User
+### 8.9 Delete Authorized Person (Admin only, DB-only)
 
 Endpoint:
-- DELETE /api/users/:firebaseUid
+- DELETE /api/users/authorized-persons/:firebaseUid
 
-Path params:
-- firebaseUid: string (required)
+Auth:
+- Required (authenticate + requireAdmin)
 
-Success response:
-- 200 OK
+Path param supports:
+- firebaseUid or Mongo _id
 
-Example success payload:
-{
-  "success": true,
-  "message": "User deleted successfully",
-  "user": {
-    "id": "...",
-    "firebaseUid": "...",
-    "email": "..."
-  }
-}
+Behavior:
+- Deletes authorized-person DB record only.
 
-Error responses:
-- 400 if firebaseUid missing
-- 404 if user not found
-- 500 on server/database errors
+## 9) Email APIs
 
-## 8) Email APIs
-
-### 8.1 Send General/Product Inquiry Email
+### 9.1 Send General/Product Inquiry Email
 
 Endpoint:
 - POST /api/send-email
 
-Description:
-- Sends inquiry email to sales inbox.
-- Supports two content modes:
-  - product_inquiry
-  - general inquiry (default path when type is not product_inquiry)
+Supports:
+- product inquiry mode
+- general inquiry mode
 
-Request body (common):
-- name
-- email
-- phone (optional)
-- company (optional)
-- message
-
-Additional for product inquiry:
-- type: product_inquiry
-- model
-- quantity
-- address (optional)
-- shippingTerm (optional)
-
-Additional for general inquiry:
-- subject (optional)
-
-Success response:
-- 200 OK
-{
-  "success": true
-}
-
-Error response:
-- 500
-{
-  "error": "Failed to send email"
-}
-
-### 8.2 Send Order Invoice Email
+### 9.2 Send Order Invoice Email
 
 Endpoint:
 - POST /api/send-invoice
 
-Description:
-- Generates and sends invoice/confirmation email to customer.
-- Sends admin notification email with order details.
+Sends:
+- customer confirmation email
+- admin notification email
 
-Request body:
-- customer: {
-  - name
-  - email
-  - phone
-  - address
-  - city
-  - state
-  - zipCode
-  - notes (optional)
-}
-- items: array of {
-  - name
-  - quantity
-  - price
-}
-- subtotal: number
-- total: number
-- orderDate: ISO string
-- paymentMethod: credit-card | bank-transfer (or any frontend-provided value)
+## 10) cURL Examples
 
-Success response:
-- 200 OK
-{
-  "success": true,
-  "orderId": "ORD-...",
-  "message": "Invoice sent successfully"
-}
+Register customer:
+curl -X POST "http://localhost:5000/api/users/register" -H "Content-Type: application/json" -d "{\"firebaseUid\":\"uid_123\",\"email\":\"john@example.com\",\"fullName\":\"John Doe\"}"
 
-Error response:
-- 500
-{
-  "error": "Failed to send invoice"
-}
+Get customers (admin token required):
+curl "http://localhost:5000/api/users?page=1&limit=10" -H "Authorization: Bearer <token>"
 
-## 9) Google Authentication Flow (End-to-End)
+Create authorized person (admin token required):
+curl -X POST "http://localhost:5000/api/users/authorized-persons" -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d "{\"fullName\":\"Manager One\",\"email\":\"manager@example.com\",\"password\":\"StrongPass123\",\"role\":\"moderator\"}"
 
-Important: Google OAuth login happens in Firebase on the frontend. Backend does not verify Google tokens in the current implementation. Backend stores profile data keyed by Firebase UID.
+Update authorized person by Mongo id:
+curl -X PUT "http://localhost:5000/api/users/authorized-persons/67f0abc1234def5678901234" -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d "{\"fullName\":\"Manager Updated\",\"password\":\"NewStrongPass123\"}"
 
-Sequence:
-1. Frontend calls Firebase signInWithPopup with Google provider.
-2. Firebase returns authenticated user object (uid, email, displayName, photoURL).
-3. Frontend calls POST /api/users/register with provider=google.
-4. Backend creates/updates MongoDB user record by firebaseUid.
-5. Frontend stores auth state and uses GET /api/users/profile/:firebaseUid for profile sync.
+Delete authorized person by Mongo id:
+curl -X DELETE "http://localhost:5000/api/users/authorized-persons/67f0abc1234def5678901234" -H "Authorization: Bearer <token>"
 
-Related frontend actions:
-- Email/password signup:
-  - Firebase createUserWithEmailAndPassword
-  - POST /api/users/register with provider=email
-- Email/password sign in:
-  - Firebase signInWithEmailAndPassword
-  - GET /api/users/profile/:firebaseUid
-- Profile update:
-  - PUT /api/users/profile/:firebaseUid
-- Dashboard users list:
-  - GET /api/users
+## 11) Current Notes
 
-## 10) CRUD Matrix
-
-User resource CRUD coverage:
-- Create: POST /api/users/register
-- Read (all): GET /api/users
-- Read (one): GET /api/users/profile/:firebaseUid
-- Update: PUT /api/users/profile/:firebaseUid
-- Delete: DELETE /api/users/:firebaseUid
-
-Inquiry/order resources:
-- Create/send inquiry: POST /api/send-email
-- Create/send invoice: POST /api/send-invoice
-- Read/Update/Delete for inquiries/orders are not implemented in this backend
-
-## 11) Example cURL Requests
-
-Create or update user:
-curl -X POST "http://localhost:5000/api/users/register" -H "Content-Type: application/json" -d "{\"firebaseUid\":\"uid_123\",\"email\":\"john@example.com\",\"fullName\":\"John Doe\",\"provider\":\"google\"}"
-
-Get all users:
-curl "http://localhost:5000/api/users?page=1&limit=10&search=john"
-
-Get profile:
-curl "http://localhost:5000/api/users/profile/uid_123"
-
-Update profile:
-curl -X PUT "http://localhost:5000/api/users/profile/uid_123" -H "Content-Type: application/json" -d "{\"companyName\":\"Acme Ltd\",\"businessType\":\"Wholesaler\"}"
-
-Delete user:
-curl -X DELETE "http://localhost:5000/api/users/uid_123"
-
-Send general inquiry:
-curl -X POST "http://localhost:5000/api/send-email" -H "Content-Type: application/json" -d "{\"name\":\"Alice\",\"email\":\"alice@example.com\",\"message\":\"Need product catalog\",\"type\":\"general\"}"
-
-Send invoice:
-curl -X POST "http://localhost:5000/api/send-invoice" -H "Content-Type: application/json" -d "{\"customer\":{\"name\":\"Alice\",\"email\":\"alice@example.com\",\"phone\":\"123\",\"address\":\"street\",\"city\":\"city\",\"state\":\"state\",\"zipCode\":\"12345\"},\"items\":[{\"name\":\"Product A\",\"quantity\":10,\"price\":20}],\"subtotal\":200,\"total\":200,\"orderDate\":\"2026-04-01T10:00:00.000Z\",\"paymentMethod\":\"credit-card\"}"
-
-## 12) Notes and Recommendations
-
-Current security model:
-- Backend trusts frontend-provided firebaseUid/email in user endpoints.
-- There is no Firebase ID token verification middleware yet.
-
-Recommended next production hardening:
-- Add Firebase Admin token verification middleware for protected routes
-- Restrict dashboard user list and delete endpoints to admin role
-- Add request validation (for example with Zod/Joi/express-validator)
-- Add rate limiting and structured logging
+- Customer and authorized-person data are separated into different collections.
+- Admin-only dashboard APIs are protected by authenticate + requireAdmin.
+- Authorized-person CRUD is DB-only and independent from customer CRUD.
+- Firebase is still used in customer auth flow and token-based route protection.
 

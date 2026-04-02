@@ -10,11 +10,15 @@ const {
   createAuthorizedPerson,
   updateAuthorizedPerson,
   deleteAuthorizedPerson,
+  loginAuthorizedPerson,
 } = require("../controllers/userController");
 const { authenticate, requireAdmin } = require("../middleware/auth");
 
 // POST /api/users/register - Register or update user
 router.post("/register", registerUser);
+
+// POST /api/users/authorized-login - Login for DB-only authorized persons
+router.post("/authorized-login", loginAuthorizedPerson);
 
 // GET /api/users - Get all users (for dashboard)
 router.get("/", authenticate, requireAdmin, getAllUsers);

@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const User = require("../models/User");
 const AuthorizedPerson = require("../models/AuthorizedPerson");
+const bcrypt = require("bcryptjs");
 const {
   admin,
   isFirebaseAdminReady,
@@ -151,8 +152,11 @@ const seedDefaultAdmin = async () => {
     if (existingDbUser) {
       if (existingDbUser.role !== "admin") {
         existingDbUser.role = "admin";
-        await existingDbUser.save();
       }
+      if (!existingDbUser.passwordHash) {
+        existingDbUser.passwordHash = await bcrypt.hash(defaultAdminPassword, 10);
+      }
+      await existingDbUser.save();
       console.log(
         `Default admin already exists in authorized collection: ${defaultAdminEmail}`
       );
@@ -172,6 +176,7 @@ const seedDefaultAdmin = async () => {
       email: defaultAdminEmail,
       provider: "email",
       role: "admin",
+      passwordHash: await bcrypt.hash(defaultAdminPassword, 10),
     });
 
     console.log(

@@ -1,10 +1,30 @@
 const User = require("../models/User");
 const AuthorizedPerson = require("../models/AuthorizedPerson");
+const jwt = require("jsonwebtoken");
 const {
   admin,
   isFirebaseAdminReady,
   getFirebaseAdminInitError,
 } = require("../config/firebaseAdmin");
+
+const verifyAuthorizedJwt = async (token) => {
+  const secret = process.env.JWT_SECRET || "local-dev-jwt-secret";
+  const payload = jwt.verify(token, secret);
+
+  if (payload?.type !== "authorized" || !payload?.sub) {
+    throw new Error("Invalid authorized token payload");
+  }
+
+  const authorizedUser = await AuthorizedPerson.findById(payload.sub);
+  if (!authorizedUser) {
+    throw new Error("Authorized account not found");
+  }
+
+  return {
+    authUser: authorizedUser,
+    decodedToken: payload,
+  };
+};
 
 const verifyTokenWithIdentityToolkit = async (token) => {
   const webApiKey = process.env.FIREBASE_WEB_API_KEY;
@@ -59,20 +79,28 @@ const authenticate = async (req, res, next) => {
       });
     }
 
-    let decodedToken;
-    if (isFirebaseAdminReady()) {
-      decodedToken = await admin.auth().verifyIdToken(token);
-    } else {
-      decodedToken = await verifyTokenWithIdentityToolkit(token);
-    }
+    let dbUser = null;
+    let decodedToken = null;
 
-    const authorizedUser = await AuthorizedPerson.findOne({
-      firebaseUid: decodedToken.uid,
-    });
-    const customerUser = !authorizedUser
-      ? await User.findOne({ firebaseUid: decodedToken.uid })
-      : null;
-    const dbUser = authorizedUser || customerUser;
+    try {
+      const authorizedResult = await verifyAuthorizedJwt(token);
+      dbUser = authorizedResult.authUser;
+      decodedToken = authorizedResult.decodedToken;
+    } catch (_jwtError) {
+      if (isFirebaseAdminReady()) {
+        decodedToken = await admin.auth().verifyIdToken(token);
+      } else {
+        decodedToken = await verifyTokenWithIdentityToolkit(token);
+      }
+
+      const authorizedUser = await AuthorizedPerson.findOne({
+        firebaseUid: decodedToken.uid,
+      });
+      const customerUser = !authorizedUser
+        ? await User.findOne({ firebaseUid: decodedToken.uid })
+        : null;
+      dbUser = authorizedUser || customerUser;
+    }
 
     if (!dbUser) {
       return res.status(401).json({

@@ -239,7 +239,6 @@ const updateInquiryStatus = async (req, res) => {
 
     const allowedStatuses = [
       "new",
-      "contacted",
       "quoted",
       "quote_accepted",
       "invoice_created",

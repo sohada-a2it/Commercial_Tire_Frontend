@@ -91,7 +91,6 @@ const inquirySchema = new mongoose.Schema(
       type: String,
       enum: [
         "new",
-        "contacted",
         "quoted",
         "quote_accepted",
         "invoice_created",

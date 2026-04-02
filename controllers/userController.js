@@ -1,5 +1,13 @@
 const User = require("../models/User");
 
+const ALLOWED_BUSINESS_TYPES = [
+  "Wholeseller",
+  "Wholesaler",
+  "Retailer",
+  "REGULAR USER",
+  "Other",
+];
+
 // Register or update user after Firebase authentication
 const registerUser = async (req, res) => {
   try {
@@ -14,6 +22,13 @@ const registerUser = async (req, res) => {
       photoURL,
       businessType,
     } = req.body;
+
+    if (businessType && !ALLOWED_BUSINESS_TYPES.includes(businessType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid business type",
+      });
+    }
 
     // Validate required fields
     if (!firebaseUid || !email || !fullName) {
@@ -76,7 +91,7 @@ const registerUser = async (req, res) => {
       country,
       provider: provider || "email",
       photoURL,
-      businessType,
+      businessType: businessType || "Other",
     });
 
     await user.save();
@@ -162,6 +177,13 @@ const updateUserProfile = async (req, res) => {
   try {
     const { firebaseUid } = req.params;
     const { companyName, fullName, whatsappNumber, country, photoURL, businessType } = req.body;
+
+    if (businessType && !ALLOWED_BUSINESS_TYPES.includes(businessType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid business type",
+      });
+    }
 
     if (!firebaseUid) {
       return res.status(400).json({

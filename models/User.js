@@ -46,7 +46,7 @@ const userSchema = new mongoose.Schema(
     },
     businessType: {
       type: String,
-      enum: ["Wholesaler", "Retailer", "Other"],
+      enum: ["Wholeseller", "Wholesaler", "Retailer", "REGULAR USER", "Other"],
       trim: true,
     },
   },

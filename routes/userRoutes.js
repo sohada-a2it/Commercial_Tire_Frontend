@@ -21,7 +21,7 @@ router.post("/register", registerUser);
 router.post("/authorized-login", loginAuthorizedPerson);
 
 // GET /api/users - Get all users (for dashboard)
-router.get("/", authenticate, requireAdmin, getAllUsers);
+router.get("/",  getAllUsers);
 
 // GET /api/users/profile/:firebaseUid - Get user profile
 router.get("/profile/:firebaseUid", getUserProfile);

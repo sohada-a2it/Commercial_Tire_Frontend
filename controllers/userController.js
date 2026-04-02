@@ -27,6 +27,7 @@ const mapUserPayload = (user) => ({
   provider: user.provider,
   photoURL: user.photoURL,
   businessType: user.businessType,
+  address: user.address || {},
   role: normalizeRole(user.role),
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
@@ -205,7 +206,7 @@ const getUserProfile = async (req, res) => {
 const updateUserProfile = async (req, res) => {
   try {
     const { firebaseUid } = req.params;
-    const { companyName, fullName, whatsappNumber, country, photoURL, businessType } = req.body;
+    const { companyName, fullName, whatsappNumber, country, photoURL, businessType, address } = req.body;
 
     if (businessType && !ALLOWED_BUSINESS_TYPES.includes(businessType)) {
       return res.status(400).json({
@@ -255,6 +256,15 @@ const updateUserProfile = async (req, res) => {
       if (country !== undefined) user.country = country;
       if (photoURL !== undefined) user.photoURL = photoURL;
       if (businessType !== undefined) user.businessType = businessType;
+      if (address !== undefined) {
+        user.address = {
+          street: address.street || user.address?.street || "",
+          city: address.city || user.address?.city || "",
+          state: address.state || user.address?.state || "",
+          postalCode: address.postalCode || user.address?.postalCode || "",
+          country: address.country || user.address?.country || "",
+        };
+      }
 
       await user.save();
 

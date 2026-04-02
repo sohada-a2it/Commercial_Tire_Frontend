@@ -1,4 +1,5 @@
 const User = require("../models/User");
+const AuthorizedPerson = require("../models/AuthorizedPerson");
 const {
   admin,
   isFirebaseAdminReady,
@@ -65,7 +66,13 @@ const authenticate = async (req, res, next) => {
       decodedToken = await verifyTokenWithIdentityToolkit(token);
     }
 
-    const dbUser = await User.findOne({ firebaseUid: decodedToken.uid });
+    const authorizedUser = await AuthorizedPerson.findOne({
+      firebaseUid: decodedToken.uid,
+    });
+    const customerUser = !authorizedUser
+      ? await User.findOne({ firebaseUid: decodedToken.uid })
+      : null;
+    const dbUser = authorizedUser || customerUser;
 
     if (!dbUser) {
       return res.status(401).json({
@@ -75,6 +82,9 @@ const authenticate = async (req, res, next) => {
     }
 
     req.authUser = dbUser;
+    if (req.authUser?.role === "user") {
+      req.authUser.role = "customer";
+    }
     req.decodedToken = decodedToken;
     next();
   } catch (error) {

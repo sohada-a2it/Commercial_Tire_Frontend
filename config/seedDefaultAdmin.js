@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const User = require("../models/User");
+const AuthorizedPerson = require("../models/AuthorizedPerson");
 const {
   admin,
   isFirebaseAdminReady,
@@ -119,34 +120,63 @@ const seedDefaultAdmin = async () => {
       console.log(
         `Firebase Admin unavailable, using Web API fallback for default admin seed: ${getFirebaseAdminInitError()}`
       );
-      firebaseUser = await createDefaultAdminWithWebApi({
-        email: defaultAdminEmail,
-        password: defaultAdminPassword,
-        displayName: defaultAdminName,
-      });
-      console.log(`Created Firebase default admin via Web API: ${defaultAdminEmail}`);
+      try {
+        firebaseUser = await createDefaultAdminWithWebApi({
+          email: defaultAdminEmail,
+          password: defaultAdminPassword,
+          displayName: defaultAdminName,
+        });
+        console.log(`Created Firebase default admin via Web API: ${defaultAdminEmail}`);
+      } catch (error) {
+        const legacyUser = await User.findOne({ email: defaultAdminEmail });
+
+        if (!legacyUser?.firebaseUid) {
+          throw error;
+        }
+
+        firebaseUser = {
+          uid: legacyUser.firebaseUid,
+          displayName: legacyUser.fullName || defaultAdminName,
+          email: defaultAdminEmail,
+        };
+        console.log(
+          `Using legacy firebaseUid from customer collection for authorized admin migration: ${defaultAdminEmail}`
+        );
+      }
     }
 
-    const existingDbUser = await User.findOne({ email: defaultAdminEmail });
+    const existingDbUser = await AuthorizedPerson.findOne({
+      email: defaultAdminEmail,
+    });
     if (existingDbUser) {
       if (existingDbUser.role !== "admin") {
         existingDbUser.role = "admin";
         await existingDbUser.save();
       }
-      console.log(`Default admin already exists in MongoDB: ${defaultAdminEmail}`);
+      console.log(
+        `Default admin already exists in authorized collection: ${defaultAdminEmail}`
+      );
       return;
     }
 
-    await User.create({
+    const existingCustomer = await User.findOne({ email: defaultAdminEmail });
+    if (existingCustomer) {
+      console.log(
+        `Default admin email already exists in customer collection and will stay isolated: ${defaultAdminEmail}`
+      );
+    }
+
+    await AuthorizedPerson.create({
       firebaseUid: firebaseUser.uid,
       fullName: firebaseUser.displayName || defaultAdminName,
       email: defaultAdminEmail,
       provider: "email",
-      businessType: "Other",
       role: "admin",
     });
 
-    console.log(`Created MongoDB default admin: ${defaultAdminEmail}`);
+    console.log(
+      `Created default admin in authorized collection: ${defaultAdminEmail}`
+    );
   } catch (error) {
     console.error("Default admin seed failed:", error.message);
   }

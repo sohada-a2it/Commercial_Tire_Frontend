@@ -1,5 +1,7 @@
 const User = require("../models/User");
-const { admin } = require("../config/firebaseAdmin");
+const AuthorizedPerson = require("../models/AuthorizedPerson");
+const bcrypt = require("bcryptjs");
+const mongoose = require("mongoose");
 
 const ALLOWED_BUSINESS_TYPES = [
   "Wholeseller",
@@ -10,11 +12,6 @@ const ALLOWED_BUSINESS_TYPES = [
 ];
 
 const ALLOWED_AUTHORIZED_ROLES = ["admin", "moderator"];
-
-const getInitialAdminEmail = () =>
-  (process.env.DEFAULT_ADMIN_EMAIL || process.env.INITIAL_ADMIN_EMAIL || "")
-    .toLowerCase()
-    .trim();
 
 const normalizeRole = (role) => (role === "user" ? "customer" : role);
 
@@ -34,6 +31,27 @@ const mapUserPayload = (user) => ({
   updatedAt: user.updatedAt,
 });
 
+const mapAuthorizedPayload = (user) => ({
+  id: user._id,
+  firebaseUid: user.firebaseUid,
+  fullName: user.fullName,
+  email: user.email,
+  provider: user.provider,
+  photoURL: user.photoURL,
+  role: user.role,
+  createdAt: user.createdAt,
+  updatedAt: user.updatedAt,
+});
+
+const findAuthorizedPersonByIdentifier = async (identifier) => {
+  const query = [{ firebaseUid: identifier }];
+  if (mongoose.Types.ObjectId.isValid(identifier)) {
+    query.push({ _id: identifier });
+  }
+
+  return AuthorizedPerson.findOne({ $or: query });
+};
+
 // Register or update user after Firebase authentication
 const registerUser = async (req, res) => {
   try {
@@ -48,7 +66,6 @@ const registerUser = async (req, res) => {
       photoURL,
       businessType,
     } = req.body;
-    const initialAdminEmail = getInitialAdminEmail();
     const normalizedEmail = email?.toLowerCase().trim();
 
     if (businessType && !ALLOWED_BUSINESS_TYPES.includes(businessType)) {
@@ -78,9 +95,7 @@ const registerUser = async (req, res) => {
       user.photoURL = photoURL || user.photoURL;
       user.businessType = businessType || user.businessType;
       if (provider) user.provider = provider;
-      if (initialAdminEmail && normalizedEmail === initialAdminEmail) {
-        user.role = "admin";
-      }
+      user.role = normalizeRole(user.role);
 
       await user.save();
 
@@ -100,11 +115,6 @@ const registerUser = async (req, res) => {
       });
     }
 
-    const assignedRole =
-      initialAdminEmail && normalizedEmail === initialAdminEmail
-        ? "admin"
-        : "customer";
-
     // Create new user
     user = new User({
       firebaseUid,
@@ -116,7 +126,7 @@ const registerUser = async (req, res) => {
       provider: provider || "email",
       photoURL,
       businessType: businessType || "Other",
-      role: assignedRole,
+      role: "customer",
     });
 
     await user.save();
@@ -148,9 +158,12 @@ const getUserProfile = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ firebaseUid });
+    const authorizedPerson = await AuthorizedPerson.findOne({ firebaseUid });
+    const customer = !authorizedPerson
+      ? await User.findOne({ firebaseUid })
+      : null;
 
-    if (!user) {
+    if (!customer && !authorizedPerson) {
       return res.status(404).json({
         success: false,
         message: "User not found",
@@ -159,7 +172,9 @@ const getUserProfile = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      user: mapUserPayload(user),
+      user: authorizedPerson
+        ? mapAuthorizedPayload(authorizedPerson)
+        : mapUserPayload(customer),
     });
   } catch (error) {
     console.error("Get user profile error:", error);
@@ -191,30 +206,50 @@ const updateUserProfile = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ firebaseUid });
+    const authorizedPerson = await AuthorizedPerson.findOne({ firebaseUid });
+    const user = !authorizedPerson
+      ? await User.findOne({ firebaseUid })
+      : null;
 
-    if (!user) {
+    if (!user && !authorizedPerson) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
-    // Update fields if provided
-    if (companyName !== undefined) user.companyName = companyName;
-    if (fullName !== undefined) user.fullName = fullName;
-    if (whatsappNumber !== undefined) user.whatsappNumber = whatsappNumber;
-    if (country !== undefined) user.country = country;
-    if (photoURL !== undefined) user.photoURL = photoURL;
-    if (businessType !== undefined) user.businessType = businessType;
+    if (authorizedPerson) {
+      // Authorized person settings updates (does not touch customer table)
+      if (fullName !== undefined) authorizedPerson.fullName = fullName;
+      if (photoURL !== undefined) authorizedPerson.photoURL = photoURL;
 
-    await user.save();
+      await authorizedPerson.save();
 
-    res.status(200).json({
-      success: true,
-      message: "Profile updated successfully",
-      user: mapUserPayload(user),
-    });
+      return res.status(200).json({
+        success: true,
+        message: "Profile updated successfully",
+        user: mapAuthorizedPayload(authorizedPerson),
+      });
+    }
+
+    if (user) {
+      // Customer profile updates
+      if (companyName !== undefined) user.companyName = companyName;
+      if (fullName !== undefined) user.fullName = fullName;
+      if (whatsappNumber !== undefined) user.whatsappNumber = whatsappNumber;
+      if (country !== undefined) user.country = country;
+      if (photoURL !== undefined) user.photoURL = photoURL;
+      if (businessType !== undefined) user.businessType = businessType;
+
+      await user.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Profile updated successfully",
+        user: mapUserPayload(user),
+      });
+    }
+
   } catch (error) {
     console.error("Update user profile error:", error);
     res.status(500).json({
@@ -238,7 +273,7 @@ const getAllUsers = async (req, res) => {
     } = req.query;
 
     // Build query
-    const query = {};
+    const query = { role: { $in: ["customer", "user"] } };
 
     // Search by name, email, company
     if (search) {
@@ -260,7 +295,7 @@ const getAllUsers = async (req, res) => {
       query.businessType = businessType;
     }
 
-    if (role) {
+    if (role && ["customer", "user"].includes(role)) {
       query.role = role;
     }
 
@@ -350,13 +385,13 @@ const deleteUser = async (req, res) => {
 
 const getAuthorizedPersons = async (req, res) => {
   try {
-    const users = await User.find({ role: { $in: ALLOWED_AUTHORIZED_ROLES } })
+    const users = await AuthorizedPerson.find({ role: { $in: ALLOWED_AUTHORIZED_ROLES } })
       .select("-__v")
       .sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
-      users: users.map(mapUserPayload),
+      users: users.map(mapAuthorizedPayload),
     });
   } catch (error) {
     return res.status(500).json({
@@ -386,7 +421,7 @@ const createAuthorizedPerson = async (req, res) => {
       });
     }
 
-    const existingUser = await User.findOne({ email: normalizedEmail });
+    const existingUser = await AuthorizedPerson.findOne({ email: normalizedEmail });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -394,25 +429,20 @@ const createAuthorizedPerson = async (req, res) => {
       });
     }
 
-    const firebaseUser = await admin.auth().createUser({
-      email: normalizedEmail,
-      password,
-      displayName: fullName,
-    });
+    const passwordHash = await bcrypt.hash(password, 10);
 
-    const user = await User.create({
-      firebaseUid: firebaseUser.uid,
+    const user = await AuthorizedPerson.create({
       fullName,
       email: normalizedEmail,
       provider: "email",
-      businessType: "Other",
       role,
+      passwordHash,
     });
 
     return res.status(201).json({
       success: true,
       message: "Authorized person created successfully",
-      user: mapUserPayload(user),
+      user: mapAuthorizedPayload(user),
     });
   } catch (error) {
     return res.status(500).json({
@@ -425,11 +455,11 @@ const createAuthorizedPerson = async (req, res) => {
 
 const updateAuthorizedPerson = async (req, res) => {
   try {
-    const { firebaseUid } = req.params;
+    const { firebaseUid: identifier } = req.params;
     const { fullName, email, password, role } = req.body;
     const normalizedEmail = email?.toLowerCase().trim();
 
-    const targetUser = await User.findOne({ firebaseUid });
+    const targetUser = await findAuthorizedPersonByIdentifier(identifier);
 
     if (!targetUser) {
       return res.status(404).json({
@@ -453,7 +483,7 @@ const updateAuthorizedPerson = async (req, res) => {
     }
 
     if (normalizedEmail && normalizedEmail !== targetUser.email) {
-      const emailConflict = await User.findOne({ email: normalizedEmail });
+      const emailConflict = await AuthorizedPerson.findOne({ email: normalizedEmail });
       if (emailConflict) {
         return res.status(400).json({
           success: false,
@@ -462,25 +492,19 @@ const updateAuthorizedPerson = async (req, res) => {
       }
     }
 
-    const firebaseUpdatePayload = {};
-    if (fullName !== undefined) firebaseUpdatePayload.displayName = fullName;
-    if (normalizedEmail !== undefined) firebaseUpdatePayload.email = normalizedEmail;
-    if (password !== undefined && password !== "") firebaseUpdatePayload.password = password;
-
-    if (Object.keys(firebaseUpdatePayload).length > 0) {
-      await admin.auth().updateUser(firebaseUid, firebaseUpdatePayload);
-    }
-
     if (fullName !== undefined) targetUser.fullName = fullName;
     if (normalizedEmail !== undefined) targetUser.email = normalizedEmail;
     if (role !== undefined) targetUser.role = role;
+    if (password !== undefined && password !== "") {
+      targetUser.passwordHash = await bcrypt.hash(password, 10);
+    }
 
     await targetUser.save();
 
     return res.status(200).json({
       success: true,
       message: "Authorized person updated successfully",
-      user: mapUserPayload(targetUser),
+      user: mapAuthorizedPayload(targetUser),
     });
   } catch (error) {
     return res.status(500).json({
@@ -493,16 +517,16 @@ const updateAuthorizedPerson = async (req, res) => {
 
 const deleteAuthorizedPerson = async (req, res) => {
   try {
-    const { firebaseUid } = req.params;
+    const { firebaseUid: identifier } = req.params;
 
-    if (req.authUser?.firebaseUid === firebaseUid) {
+    if (req.authUser?.firebaseUid && req.authUser.firebaseUid === identifier) {
       return res.status(400).json({
         success: false,
         message: "You cannot delete your own account",
       });
     }
 
-    const targetUser = await User.findOne({ firebaseUid });
+    const targetUser = await findAuthorizedPersonByIdentifier(identifier);
 
     if (!targetUser) {
       return res.status(404).json({
@@ -518,8 +542,7 @@ const deleteAuthorizedPerson = async (req, res) => {
       });
     }
 
-    await admin.auth().deleteUser(firebaseUid);
-    await User.deleteOne({ firebaseUid });
+    await AuthorizedPerson.deleteOne({ _id: targetUser._id });
 
     return res.status(200).json({
       success: true,

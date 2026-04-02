@@ -138,7 +138,19 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
+const requireStaff = (req, res, next) => {
+  if (!req.authUser || !["admin", "moderator"].includes(req.authUser.role)) {
+    return res.status(403).json({
+      success: false,
+      message: "Staff access required",
+    });
+  }
+
+  next();
+};
+
 module.exports = {
   authenticate,
   requireAdmin,
+  requireStaff,
 };

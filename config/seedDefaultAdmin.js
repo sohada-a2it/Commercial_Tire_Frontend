@@ -52,6 +52,8 @@ const createDefaultAdminWithWebApi = async ({ email, password, displayName }) =>
   throw new Error(`Fallback Firebase signUp failed: ${firebaseMessage || "Unknown error"}`);
 };
 
+
+
 const waitForDbConnection = async () => {
   if (mongoose.connection.readyState === 1) {
     return;

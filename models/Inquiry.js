@@ -1,0 +1,146 @@
+const mongoose = require("mongoose");
+
+const inquiryItemSchema = new mongoose.Schema(
+  {
+    productId: {
+      type: String,
+      trim: true,
+    },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    image: {
+      type: String,
+      trim: true,
+    },
+    quantity: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    unitPrice: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    lineTotal: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
+const inquirySchema = new mongoose.Schema(
+  {
+    inquiryNumber: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+    },
+    customer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    customerSnapshot: {
+      name: { type: String, required: true, trim: true },
+      email: { type: String, required: true, trim: true, lowercase: true },
+      phone: { type: String, required: true, trim: true },
+      companyName: { type: String, trim: true },
+      address: { type: String, required: true, trim: true },
+      city: { type: String, required: true, trim: true },
+      state: { type: String, required: true, trim: true },
+      zipCode: { type: String, required: true, trim: true },
+      notes: { type: String, trim: true },
+      whatsappNumber: { type: String, trim: true },
+    },
+    items: {
+      type: [inquiryItemSchema],
+      validate: {
+        validator: (items) => Array.isArray(items) && items.length > 0,
+        message: "At least one item is required",
+      },
+    },
+    subtotal: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    total: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    currency: {
+      type: String,
+      default: "USD",
+      trim: true,
+    },
+    paymentMethod: {
+      type: String,
+      enum: ["credit-card", "bank"],
+      default: "bank",
+    },
+    status: {
+      type: String,
+      enum: [
+        "new",
+        "contacted",
+        "quoted",
+        "quote_accepted",
+        "invoice_created",
+        "closed",
+        "cancelled",
+      ],
+      default: "new",
+      index: true,
+    },
+    quote: {
+      amount: { type: Number, min: 0 },
+      currency: { type: String, trim: true, default: "USD" },
+      notes: { type: String, trim: true },
+      quotedAt: { type: Date },
+      quotedByName: { type: String, trim: true },
+      quotedByEmail: { type: String, trim: true, lowercase: true },
+    },
+    quoteAcceptedAt: {
+      type: Date,
+    },
+    contactChannel: {
+      type: String,
+      enum: ["email", "whatsapp", "phone", "mixed"],
+      default: "mixed",
+    },
+    internalNotes: {
+      type: String,
+      trim: true,
+    },
+    payment: {
+      confirmed: { type: Boolean, default: false },
+      paidAmount: { type: Number, min: 0, default: 0 },
+      confirmedAt: { type: Date },
+      notes: { type: String, trim: true },
+    },
+    linkedInvoice: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Invoice",
+      index: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+inquirySchema.index({ customer: 1, createdAt: -1 });
+inquirySchema.index({ status: 1, createdAt: -1 });
+
+const Inquiry = mongoose.model("Inquiry", inquirySchema);
+
+module.exports = Inquiry;

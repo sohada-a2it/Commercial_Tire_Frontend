@@ -48,6 +48,12 @@ const buildPaging = (query = {}, { defaultLimit = 20, maxLimit = 100 } = {}) => 
   return { page, limit, skip };
 };
 
+const normalizeSourceId = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
 const normalizePricingTiers = (tiers = []) =>
   Array.isArray(tiers)
     ? tiers.map((tier) => ({
@@ -164,7 +170,7 @@ const upsertImportedMediaAsset = async ({
 };
 
 const normalizeProductPayload = (payload = {}) => ({
-  sourceId: payload.sourceId ?? payload.id ?? undefined,
+  sourceId: normalizeSourceId(payload.sourceId ?? payload.id),
   name: String(payload.name || "").trim(),
   slug: String(payload.slug || slugifyText(payload.name)).trim(),
   sku: String(payload.sku || "").trim(),
@@ -197,7 +203,7 @@ const normalizeProductPayload = (payload = {}) => ({
 });
 
 const normalizeCategoryPayload = (payload = {}) => ({
-  sourceId: payload.sourceId ?? payload.id ?? undefined,
+  sourceId: normalizeSourceId(payload.sourceId ?? payload.id),
   name: String(payload.name || "").trim(),
   slug: String(payload.slug || slugifyText(payload.name)).trim(),
   icon: String(payload.icon || "").trim(),

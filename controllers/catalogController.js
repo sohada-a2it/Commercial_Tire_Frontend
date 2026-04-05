@@ -35,6 +35,19 @@ const normalizeNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const toPositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const buildPaging = (query = {}, { defaultLimit = 20, maxLimit = 100 } = {}) => {
+  const page = toPositiveInt(query.page, 1);
+  const requestedLimit = toPositiveInt(query.limit, defaultLimit);
+  const limit = Math.max(1, Math.min(maxLimit, requestedLimit));
+  const skip = (page - 1) * limit;
+  return { page, limit, skip };
+};
+
 const normalizePricingTiers = (tiers = []) =>
   Array.isArray(tiers)
     ? tiers.map((tier) => ({
@@ -164,7 +177,7 @@ const normalizeProductPayload = (payload = {}) => ({
   subcategoryName: String(payload.subcategoryName || payload.subcategory?.name || "").trim(),
   subcategorySlug: String(payload.subcategorySlug || slugifyText(payload.subcategoryName || payload.subcategory?.name || "")).trim(),
   pattern: String(payload.pattern || payload.keyAttributes?.Pattern || "").trim(),
-  brand: String(payload.brand || "").trim(),
+  brand: String(payload.brand || payload.keyAttributes?.Brand || "").trim(),
   price: String(payload.price || "").trim(),
   offerPrice: String(payload.offerPrice || "").trim(),
   pricingTiers: normalizePricingTiers(payload.pricingTiers),
@@ -250,8 +263,8 @@ const mapProduct = (product) => ({
   subcategoryId: product.subcategoryId,
   subcategoryName: product.subcategoryName,
   subcategorySlug: product.subcategorySlug,
-  pattern: product.pattern,
-  brand: product.brand,
+  pattern: product.pattern || product.keyAttributes?.Pattern || "",
+  brand: product.brand || product.keyAttributes?.Brand || "",
   price: product.price,
   offerPrice: product.offerPrice,
   pricingTiers: product.pricingTiers || [],
@@ -273,44 +286,60 @@ const mapProduct = (product) => ({
 });
 
 const buildQuery = (query = {}) => {
-  const filter = {};
+  const clauses = [];
 
   if (query.search) {
-    const regex = { $regex: query.search, $options: "i" };
-    filter.$or = [
-      { name: regex },
-      { slug: regex },
-      { description: regex },
-      { mainCategory: regex },
-      { subCategory: regex },
-      { pattern: regex },
-      { brand: regex },
-      { categoryName: regex },
-      { subcategoryName: regex },
-    ];
+    const regex = { $regex: String(query.search), $options: "i" };
+    clauses.push({
+      $or: [
+        { name: regex },
+        { slug: regex },
+        { description: regex },
+        { mainCategory: regex },
+        { subCategory: regex },
+        { pattern: regex },
+        { "keyAttributes.Pattern": regex },
+        { brand: regex },
+        { "keyAttributes.Brand": regex },
+        { categoryName: regex },
+        { subcategoryName: regex },
+      ],
+    });
   }
 
   if (query.categoryId && mongoose.Types.ObjectId.isValid(query.categoryId)) {
-    filter.category = query.categoryId;
+    clauses.push({ category: query.categoryId });
+  }
+
+  if (query.category) {
+    clauses.push({ categoryName: { $regex: String(query.category), $options: "i" } });
   }
 
   if (query.subcategoryId) {
-    filter.subcategoryId = normalizeNumber(query.subcategoryId);
+    clauses.push({ subcategoryId: normalizeNumber(query.subcategoryId) });
+  }
+
+  if (query.subcategory) {
+    clauses.push({ subcategoryName: { $regex: String(query.subcategory), $options: "i" } });
   }
 
   if (query.pattern) {
-    filter.pattern = { $regex: String(query.pattern), $options: "i" };
+    const regex = { $regex: String(query.pattern), $options: "i" };
+    clauses.push({ $or: [{ pattern: regex }, { "keyAttributes.Pattern": regex }] });
   }
 
   if (query.brand) {
-    filter.brand = { $regex: String(query.brand), $options: "i" };
+    const regex = { $regex: String(query.brand), $options: "i" };
+    clauses.push({ $or: [{ brand: regex }, { "keyAttributes.Brand": regex }] });
   }
 
   if (query.isActive !== undefined) {
-    filter.isActive = query.isActive === "true" || query.isActive === true;
+    clauses.push({ isActive: query.isActive === "true" || query.isActive === true });
   }
 
-  return filter;
+  if (!clauses.length) return {};
+  if (clauses.length === 1) return clauses[0];
+  return { $and: clauses };
 };
 
 const syncProductCategoryFields = async (productPayload) => {
@@ -372,10 +401,75 @@ const uploadBufferToCloudinary = (buffer, filename) =>
     stream.end(buffer);
   });
 
-const listCategories = async (_req, res) => {
+const listCategories = async (req, res) => {
   try {
-    const categories = await Category.find().sort({ displayOrder: 1, createdAt: 1 });
-    res.json({ success: true, categories: categories.map(mapCategory) });
+    const search = String(req.query.search || "").trim();
+    const sortBy = String(req.query.sort || "main-asc").trim();
+    const paginate = req.query.paginate === "true" || req.query.page || req.query.limit;
+
+    const filter = search
+      ? {
+          $or: [
+            { name: { $regex: search, $options: "i" } },
+            { slug: { $regex: search, $options: "i" } },
+            { "subcategories.name": { $regex: search, $options: "i" } },
+          ],
+        }
+      : {};
+
+    const sortStage =
+      sortBy === "main-desc"
+        ? { name: -1 }
+        : sortBy === "sub-asc"
+        ? { subcategoryCount: 1, name: 1 }
+        : sortBy === "sub-desc"
+        ? { subcategoryCount: -1, name: 1 }
+        : { name: 1 };
+
+    if (!paginate) {
+      const categories = await Category.aggregate([
+        { $match: filter },
+        {
+          $addFields: {
+            subcategoryCount: { $size: { $ifNull: ["$subcategories", []] } },
+          },
+        },
+        { $sort: sortStage },
+      ]);
+      return res.json({ success: true, categories: categories.map(mapCategory) });
+    }
+
+    const { page, limit, skip } = buildPaging(req.query, { defaultLimit: 20, maxLimit: 100 });
+
+    const [categories, total] = await Promise.all([
+      Category.aggregate([
+        { $match: filter },
+        {
+          $addFields: {
+            subcategoryCount: { $size: { $ifNull: ["$subcategories", []] } },
+          },
+        },
+        { $sort: sortStage },
+        { $skip: skip },
+        { $limit: limit },
+      ]),
+      Category.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    res.json({
+      success: true,
+      categories: categories.map(mapCategory),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -445,8 +539,61 @@ const deleteCategory = async (req, res) => {
 const listProducts = async (req, res) => {
   try {
     const filter = buildQuery(req.query);
-    const products = await Product.find(filter).sort({ createdAt: -1 }).populate("category");
-    res.json({ success: true, products: products.map(mapProduct) });
+    const { page, limit, skip } = buildPaging(req.query, { defaultLimit: 20, maxLimit: 100 });
+
+    const sortBy = String(req.query.sort || "newest");
+    let sort = { createdAt: -1 };
+    if (sortBy === "name-asc") sort = { name: 1, createdAt: -1 };
+    else if (sortBy === "name-desc") sort = { name: -1, createdAt: -1 };
+    else if (sortBy === "brand-asc") sort = { brand: 1, name: 1 };
+    else if (sortBy === "brand-desc") sort = { brand: -1, name: 1 };
+
+    const [products, total, categories, subcategories, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
+      Product.find(filter).sort(sort).skip(skip).limit(limit).populate("category"),
+      Product.countDocuments(filter),
+      Product.distinct("categoryName", filter),
+      Product.distinct("subcategoryName", filter),
+      Product.distinct("brand", filter),
+      Product.distinct("keyAttributes.Brand", filter),
+      Product.distinct("pattern", filter),
+      Product.distinct("keyAttributes.Pattern", filter),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const brands = Array.from(
+      new Set(
+        [...(brandsDirect || []), ...(brandsFromAttributes || [])]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+    const patterns = Array.from(
+      new Set(
+        [...(patternsDirect || []), ...(patternsFromAttributes || [])]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+    res.json({
+      success: true,
+      products: products.map(mapProduct),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+      filters: {
+        categories: (categories || []).map((value) => String(value || "").trim()).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+        subcategories: (subcategories || []).map((value) => String(value || "").trim()).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+        brands,
+        patterns,
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

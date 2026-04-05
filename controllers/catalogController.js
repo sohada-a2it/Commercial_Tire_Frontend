@@ -169,38 +169,42 @@ const upsertImportedMediaAsset = async ({
   );
 };
 
-const normalizeProductPayload = (payload = {}) => ({
-  sourceId: normalizeSourceId(payload.sourceId ?? payload.id),
-  name: String(payload.name || "").trim(),
-  slug: String(payload.slug || slugifyText(payload.name)).trim(),
-  sku: String(payload.sku || "").trim(),
-  category: payload.category,
-  mainCategory: String(payload.mainCategory || payload.categoryName || "").trim(),
-  subCategory: String(payload.subCategory || payload.subcategoryName || "").trim(),
-  categoryName: String(payload.categoryName || "").trim(),
-  categoryIcon: String(payload.categoryIcon || "").trim(),
-  subcategoryId: normalizeNumber(payload.subcategoryId ?? payload.subcategory?.id ?? 0),
-  subcategoryName: String(payload.subcategoryName || payload.subcategory?.name || "").trim(),
-  subcategorySlug: String(payload.subcategorySlug || slugifyText(payload.subcategoryName || payload.subcategory?.name || "")).trim(),
-  pattern: String(payload.pattern || payload.keyAttributes?.Pattern || "").trim(),
-  brand: String(payload.brand || payload.keyAttributes?.Brand || "").trim(),
-  price: String(payload.price || "").trim(),
-  offerPrice: String(payload.offerPrice || "").trim(),
-  pricingTiers: normalizePricingTiers(payload.pricingTiers),
-  customizationOptions: Array.isArray(payload.customizationOptions) ? payload.customizationOptions.map((item) => String(item)) : [],
-  shipping: String(payload.shipping || "").trim(),
-  description: String(payload.description || "").trim(),
-  image: normalizeAsset(payload.image || {}),
-  images: Array.isArray(payload.images) ? payload.images.map((item) => normalizeAsset(item)) : [],
-  keyAttributes: payload.keyAttributes || {},
-  packagingAndDelivery: payload.packagingAndDelivery || {},
-  priceSource: String(payload.priceSource || "").trim(),
-  userReviews: normalizeReviews(payload.userReviews),
-  tags: Array.isArray(payload.tags) ? payload.tags.map((tag) => String(tag)) : [],
-  isFeatured: Boolean(payload.isFeatured),
-  isActive: payload.isActive === undefined ? true : Boolean(payload.isActive),
-  metadata: payload.metadata || {},
-});
+const normalizeProductPayload = (payload = {}) => {
+  const resolvedSourceId = normalizeSourceId(payload.sourceId ?? payload.id);
+
+  return {
+    ...(resolvedSourceId !== undefined ? { sourceId: resolvedSourceId } : {}),
+    name: String(payload.name || "").trim(),
+    slug: String(payload.slug || slugifyText(payload.name)).trim(),
+    sku: String(payload.sku || "").trim(),
+    category: payload.category,
+    mainCategory: String(payload.mainCategory || payload.categoryName || "").trim(),
+    subCategory: String(payload.subCategory || payload.subcategoryName || "").trim(),
+    categoryName: String(payload.categoryName || "").trim(),
+    categoryIcon: String(payload.categoryIcon || "").trim(),
+    subcategoryId: normalizeNumber(payload.subcategoryId ?? payload.subcategory?.id ?? 0),
+    subcategoryName: String(payload.subcategoryName || payload.subcategory?.name || "").trim(),
+    subcategorySlug: String(payload.subcategorySlug || slugifyText(payload.subcategoryName || payload.subcategory?.name || "")).trim(),
+    pattern: String(payload.pattern || payload.keyAttributes?.Pattern || "").trim(),
+    brand: String(payload.brand || payload.keyAttributes?.Brand || "").trim(),
+    price: String(payload.price || "").trim(),
+    offerPrice: String(payload.offerPrice || "").trim(),
+    pricingTiers: normalizePricingTiers(payload.pricingTiers),
+    customizationOptions: Array.isArray(payload.customizationOptions) ? payload.customizationOptions.map((item) => String(item)) : [],
+    shipping: String(payload.shipping || "").trim(),
+    description: String(payload.description || "").trim(),
+    image: normalizeAsset(payload.image || {}),
+    images: Array.isArray(payload.images) ? payload.images.map((item) => normalizeAsset(item)) : [],
+    keyAttributes: payload.keyAttributes || {},
+    packagingAndDelivery: payload.packagingAndDelivery || {},
+    priceSource: String(payload.priceSource || "").trim(),
+    userReviews: normalizeReviews(payload.userReviews),
+    tags: Array.isArray(payload.tags) ? payload.tags.map((tag) => String(tag)) : [],
+    isFeatured: Boolean(payload.isFeatured),
+    isActive: payload.isActive === undefined ? true : Boolean(payload.isActive),
+    metadata: payload.metadata || {},
+  };
+};
 
 const normalizeCategoryPayload = (payload = {}) => ({
   sourceId: normalizeSourceId(payload.sourceId ?? payload.id),
@@ -219,22 +223,24 @@ const normalizeCategoryPayload = (payload = {}) => ({
     publicId: String(payload.image?.publicId || payload.heroImagePublicId || "").trim(),
   },
   subcategories: Array.isArray(payload.subcategories)
-    ? payload.subcategories.map((subcategory, index) => ({
-        id: normalizeNumber(subcategory?.id ?? index + 1),
-        name: String(subcategory?.name || "").trim(),
-        slug: String(subcategory?.slug || slugifyText(subcategory?.name)).trim(),
-        description: String(subcategory?.description || "").trim(),
-        displayOrder: normalizeNumber(subcategory?.displayOrder ?? index),
-        isActive: subcategory?.isActive === undefined ? true : Boolean(subcategory?.isActive),
-        image: {
-          url: String(
-            typeof subcategory?.image === "string"
-              ? subcategory.image
-              : subcategory?.image?.url || ""
-          ).trim(),
-          publicId: String(subcategory?.image?.publicId || "").trim(),
-        },
-      }))
+    ? payload.subcategories
+        .map((subcategory, index) => ({
+          id: normalizeNumber(subcategory?.id ?? index + 1),
+          name: String(subcategory?.name || "").trim(),
+          slug: String(subcategory?.slug || slugifyText(subcategory?.name)).trim(),
+          description: String(subcategory?.description || "").trim(),
+          displayOrder: normalizeNumber(subcategory?.displayOrder ?? index),
+          isActive: subcategory?.isActive === undefined ? true : Boolean(subcategory?.isActive),
+          image: {
+            url: String(
+              typeof subcategory?.image === "string"
+                ? subcategory.image
+                : subcategory?.image?.url || ""
+            ).trim(),
+            publicId: String(subcategory?.image?.publicId || "").trim(),
+          },
+        }))
+        .filter((subcategory) => subcategory.name)
     : [],
   metadata: payload.metadata || {},
 });
@@ -432,16 +438,23 @@ const listCategories = async (req, res) => {
     const search = String(req.query.search || "").trim();
     const sortBy = String(req.query.sort || "main-asc").trim();
     const paginate = req.query.paginate === "true" || req.query.page || req.query.limit;
+    const statusFilter = String(req.query.isActive || "all").trim().toLowerCase();
 
-    const filter = search
-      ? {
-          $or: [
-            { name: { $regex: search, $options: "i" } },
-            { slug: { $regex: search, $options: "i" } },
-            { "subcategories.name": { $regex: search, $options: "i" } },
-          ],
-        }
-      : {};
+    const filter = {};
+
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { slug: { $regex: search, $options: "i" } },
+        { "subcategories.name": { $regex: search, $options: "i" } },
+      ];
+    }
+
+    if (statusFilter === "true" || statusFilter === "active") {
+      filter.isActive = true;
+    } else if (statusFilter === "false" || statusFilter === "inactive") {
+      filter.isActive = false;
+    }
 
     const sortStage =
       sortBy === "main-desc"

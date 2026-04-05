@@ -1,4 +1,46 @@
 const mongoose = require("mongoose");
+const Counter = require("./Counter");
+
+const PRODUCT_SOURCE_COUNTER_KEY = "product-source-id";
+
+const ensureProductCounterSeeded = async () => {
+  const existingCounter = await Counter.findById(PRODUCT_SOURCE_COUNTER_KEY).lean();
+  if (existingCounter) {
+    return;
+  }
+
+  const maxProduct = await mongoose
+    .model("Product")
+    .findOne({ sourceId: { $exists: true, $ne: null } })
+    .sort({ sourceId: -1 })
+    .select({ sourceId: 1 })
+    .lean();
+
+  const seed = Number(maxProduct?.sourceId) || 0;
+
+  try {
+    await Counter.create({
+      _id: PRODUCT_SOURCE_COUNTER_KEY,
+      seq: seed,
+    });
+  } catch (error) {
+    if (error?.code !== 11000) {
+      throw error;
+    }
+  }
+};
+
+const getNextProductSourceId = async () => {
+  await ensureProductCounterSeeded();
+
+  const counter = await Counter.findByIdAndUpdate(
+    PRODUCT_SOURCE_COUNTER_KEY,
+    { $inc: { seq: 1 } },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+
+  return counter.seq;
+};
 
 const pricingTierSchema = new mongoose.Schema(
   {
@@ -73,6 +115,29 @@ const productSchema = new mongoose.Schema(
 );
 
 productSchema.index({ category: 1, subcategoryId: 1, createdAt: -1 });
+
+productSchema.pre("validate", async function autoAssignSourceId(next) {
+  try {
+    if (this.sourceId === undefined || this.sourceId === null || this.sourceId === "") {
+      this.sourceId = await getNextProductSourceId();
+      return next();
+    }
+
+    const numericSourceId = Number(this.sourceId);
+    if (Number.isFinite(numericSourceId) && numericSourceId > 0) {
+      await Counter.findByIdAndUpdate(
+        PRODUCT_SOURCE_COUNTER_KEY,
+        { $max: { seq: numericSourceId } },
+        { upsert: true, setDefaultsOnInsert: true }
+      );
+      this.sourceId = numericSourceId;
+    }
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
 
 const Product = mongoose.model("Product", productSchema);
 

@@ -8,6 +8,10 @@ const subcategorySchema = new mongoose.Schema(
     description: { type: String, trim: true },
     displayOrder: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
+    image: {
+      url: { type: String, trim: true, default: "" },
+      publicId: { type: String, trim: true, default: "" },
+    },
   },
   { timestamps: true }
 );

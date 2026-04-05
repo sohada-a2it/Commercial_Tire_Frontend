@@ -163,6 +163,7 @@ const normalizeProductPayload = (payload = {}) => ({
   subcategoryId: normalizeNumber(payload.subcategoryId ?? payload.subcategory?.id ?? 0),
   subcategoryName: String(payload.subcategoryName || payload.subcategory?.name || "").trim(),
   subcategorySlug: String(payload.subcategorySlug || slugifyText(payload.subcategoryName || payload.subcategory?.name || "")).trim(),
+  pattern: String(payload.pattern || payload.keyAttributes?.Pattern || "").trim(),
   brand: String(payload.brand || "").trim(),
   price: String(payload.price || "").trim(),
   offerPrice: String(payload.offerPrice || "").trim(),
@@ -206,6 +207,14 @@ const normalizeCategoryPayload = (payload = {}) => ({
         description: String(subcategory?.description || "").trim(),
         displayOrder: normalizeNumber(subcategory?.displayOrder ?? index),
         isActive: subcategory?.isActive === undefined ? true : Boolean(subcategory?.isActive),
+        image: {
+          url: String(
+            typeof subcategory?.image === "string"
+              ? subcategory.image
+              : subcategory?.image?.url || ""
+          ).trim(),
+          publicId: String(subcategory?.image?.publicId || "").trim(),
+        },
       }))
     : [],
   metadata: payload.metadata || {},
@@ -241,6 +250,7 @@ const mapProduct = (product) => ({
   subcategoryId: product.subcategoryId,
   subcategoryName: product.subcategoryName,
   subcategorySlug: product.subcategorySlug,
+  pattern: product.pattern,
   brand: product.brand,
   price: product.price,
   offerPrice: product.offerPrice,
@@ -273,6 +283,8 @@ const buildQuery = (query = {}) => {
       { description: regex },
       { mainCategory: regex },
       { subCategory: regex },
+      { pattern: regex },
+      { brand: regex },
       { categoryName: regex },
       { subcategoryName: regex },
     ];
@@ -284,6 +296,14 @@ const buildQuery = (query = {}) => {
 
   if (query.subcategoryId) {
     filter.subcategoryId = normalizeNumber(query.subcategoryId);
+  }
+
+  if (query.pattern) {
+    filter.pattern = { $regex: String(query.pattern), $options: "i" };
+  }
+
+  if (query.brand) {
+    filter.brand = { $regex: String(query.brand), $options: "i" };
   }
 
   if (query.isActive !== undefined) {

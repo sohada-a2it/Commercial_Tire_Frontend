@@ -29,7 +29,7 @@ router.get("/products", authenticate, requireStaff, listProducts);
 router.get("/products/:productId", authenticate, requireStaff, getProduct);
 router.post("/products", authenticate, requireStaff, createProduct);
 router.put("/products/:productId", authenticate, requireStaff, updateProduct);
-router.delete("/products/:productId", authenticate, requireStaff, deleteProduct);
+router.delete("/products/:productId", authenticate, requireAdmin, deleteProduct);
 
 router.get("/media", authenticate, requireStaff, listMedia);
 router.post("/media/upload", authenticate, requireStaff, uploadMiddleware, uploadMedia);

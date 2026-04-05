@@ -50,6 +50,7 @@ const productSchema = new mongoose.Schema(
     subcategoryId: { type: Number, default: 0 },
     subcategoryName: { type: String, trim: true, default: "" },
     subcategorySlug: { type: String, trim: true, default: "" },
+    pattern: { type: String, trim: true, default: "" },
     brand: { type: String, trim: true, default: "" },
     price: { type: String, trim: true, default: "" },
     offerPrice: { type: String, trim: true, default: "" },

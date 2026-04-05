@@ -1,0 +1,786 @@
+const fs = require("fs/promises");
+const path = require("path");
+const mongoose = require("mongoose");
+const multer = require("multer");
+const Category = require("../models/Category");
+const Product = require("../models/Product");
+const MediaAsset = require("../models/MediaAsset");
+const { cloudinary, buildOptimizedUrl } = require("../config/cloudinary");
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+const slugifyText = (value = "") =>
+  String(value)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "item";
+
+const getFrontendCatalogPath = () =>
+  path.resolve(__dirname, "..", "..", "Asian.Import.Export.Co.Frontend", "public", "categories.json");
+
+const getFrontendAssetPath = (assetPath = "") =>
+  path.resolve(
+    __dirname,
+    "..",
+    "..",
+    "Asian.Import.Export.Co.Frontend",
+    "public",
+    String(assetPath).replace(/^\//, "")
+  );
+
+const normalizeNumber = (value) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value || "").replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizePricingTiers = (tiers = []) =>
+  Array.isArray(tiers)
+    ? tiers.map((tier) => ({
+        minQuantity: tier?.minQuantity === null ? null : normalizeNumber(tier?.minQuantity ?? tier?.min ?? 0),
+        maxQuantity:
+          tier?.maxQuantity === null || tier?.max === null
+            ? null
+            : normalizeNumber(tier?.maxQuantity ?? tier?.max ?? 0),
+        pricePerTire: tier?.pricePerTire ? String(tier.pricePerTire) : tier?.price ? String(tier.price) : "",
+        note: tier?.note ? String(tier.note) : "",
+      }))
+    : [];
+
+const normalizeReviews = (reviews = []) =>
+  Array.isArray(reviews)
+    ? reviews.map((review) => ({
+        username: review?.username ? String(review.username) : review?.author ? String(review.author) : "",
+        location: review?.location ? String(review.location) : "",
+        rating: normalizeNumber(review?.rating ?? 0),
+        date: review?.date ? String(review.date) : "",
+        title: review?.title ? String(review.title) : "",
+        text: review?.text ? String(review.text) : review?.comment ? String(review.comment) : "",
+        verified: review?.verified === undefined ? false : Boolean(review.verified),
+      }))
+    : [];
+
+const normalizeAsset = (asset = {}) => {
+  if (typeof asset === "string") {
+    return {
+      url: asset,
+      publicId: "",
+      alt: "",
+      width: 0,
+      height: 0,
+      bytes: 0,
+      format: "",
+    };
+  }
+
+  return {
+    url: asset?.url ? String(asset.url) : "",
+    publicId: asset?.publicId ? String(asset.publicId) : "",
+    alt: asset?.alt ? String(asset.alt) : "",
+    width: normalizeNumber(asset?.width ?? 0),
+    height: normalizeNumber(asset?.height ?? 0),
+    bytes: normalizeNumber(asset?.bytes ?? 0),
+    format: asset?.format ? String(asset.format) : "",
+  };
+};
+
+const uploadCatalogAsset = async (asset, fallbackName = "") => {
+  const normalized = normalizeAsset(asset);
+  const sourcePath = typeof asset === "string" ? asset : normalized.url;
+
+  if (!sourcePath || normalized.publicId || !sourcePath.startsWith("/assets/")) {
+    return normalized;
+  }
+
+  const localPath = getFrontendAssetPath(sourcePath);
+
+  try {
+    await fs.access(localPath);
+    const uploaded = await cloudinary.uploader.upload(localPath, {
+      folder: process.env.CLOUDINARY_CATALOG_FOLDER || "asian-import-export/catalog",
+      resource_type: "image",
+      overwrite: false,
+      quality: "auto:good",
+      fetch_format: "auto",
+    });
+
+    return {
+      url: buildOptimizedUrl(uploaded.public_id, uploaded.resource_type || "image"),
+      publicId: uploaded.public_id,
+      alt: fallbackName,
+      width: uploaded.width || 0,
+      height: uploaded.height || 0,
+      bytes: uploaded.bytes || 0,
+      format: uploaded.format || "",
+    };
+  } catch (_error) {
+    return normalized;
+  }
+};
+
+const upsertImportedMediaAsset = async ({
+  asset,
+  originalFilename = "",
+  relatedType = "",
+  relatedId = "",
+  metadata = {},
+}) => {
+  if (!asset?.publicId) return;
+
+  await MediaAsset.findOneAndUpdate(
+    { publicId: asset.publicId },
+    {
+      $set: {
+        assetType: "image",
+        format: asset.format || "",
+        originalFilename: originalFilename || asset.alt || asset.publicId,
+        url: asset.url || "",
+        optimizedUrl: asset.url || "",
+        bytes: asset.bytes || 0,
+        width: asset.width || 0,
+        height: asset.height || 0,
+        folder: process.env.CLOUDINARY_CATALOG_FOLDER || "asian-import-export/catalog",
+        relatedType,
+        relatedId: String(relatedId || ""),
+        metadata,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+};
+
+const normalizeProductPayload = (payload = {}) => ({
+  sourceId: payload.sourceId ?? payload.id ?? undefined,
+  name: String(payload.name || "").trim(),
+  slug: String(payload.slug || slugifyText(payload.name)).trim(),
+  sku: String(payload.sku || "").trim(),
+  category: payload.category,
+  mainCategory: String(payload.mainCategory || payload.categoryName || "").trim(),
+  subCategory: String(payload.subCategory || payload.subcategoryName || "").trim(),
+  categoryName: String(payload.categoryName || "").trim(),
+  categoryIcon: String(payload.categoryIcon || "").trim(),
+  subcategoryId: normalizeNumber(payload.subcategoryId ?? payload.subcategory?.id ?? 0),
+  subcategoryName: String(payload.subcategoryName || payload.subcategory?.name || "").trim(),
+  subcategorySlug: String(payload.subcategorySlug || slugifyText(payload.subcategoryName || payload.subcategory?.name || "")).trim(),
+  brand: String(payload.brand || "").trim(),
+  price: String(payload.price || "").trim(),
+  offerPrice: String(payload.offerPrice || "").trim(),
+  pricingTiers: normalizePricingTiers(payload.pricingTiers),
+  customizationOptions: Array.isArray(payload.customizationOptions) ? payload.customizationOptions.map((item) => String(item)) : [],
+  shipping: String(payload.shipping || "").trim(),
+  description: String(payload.description || "").trim(),
+  image: normalizeAsset(payload.image || {}),
+  images: Array.isArray(payload.images) ? payload.images.map((item) => normalizeAsset(item)) : [],
+  keyAttributes: payload.keyAttributes || {},
+  packagingAndDelivery: payload.packagingAndDelivery || {},
+  priceSource: String(payload.priceSource || "").trim(),
+  userReviews: normalizeReviews(payload.userReviews),
+  tags: Array.isArray(payload.tags) ? payload.tags.map((tag) => String(tag)) : [],
+  isFeatured: Boolean(payload.isFeatured),
+  isActive: payload.isActive === undefined ? true : Boolean(payload.isActive),
+  metadata: payload.metadata || {},
+});
+
+const normalizeCategoryPayload = (payload = {}) => ({
+  sourceId: payload.sourceId ?? payload.id ?? undefined,
+  name: String(payload.name || "").trim(),
+  slug: String(payload.slug || slugifyText(payload.name)).trim(),
+  icon: String(payload.icon || "").trim(),
+  description: String(payload.description || "").trim(),
+  displayOrder: normalizeNumber(payload.displayOrder ?? 0),
+  isActive: payload.isActive === undefined ? true : Boolean(payload.isActive),
+  image: {
+    url: String(
+      typeof payload.image === "string"
+        ? payload.image
+        : payload.image?.url || payload.heroImage || ""
+    ).trim(),
+    publicId: String(payload.image?.publicId || payload.heroImagePublicId || "").trim(),
+  },
+  subcategories: Array.isArray(payload.subcategories)
+    ? payload.subcategories.map((subcategory, index) => ({
+        id: normalizeNumber(subcategory?.id ?? index + 1),
+        name: String(subcategory?.name || "").trim(),
+        slug: String(subcategory?.slug || slugifyText(subcategory?.name)).trim(),
+        description: String(subcategory?.description || "").trim(),
+        displayOrder: normalizeNumber(subcategory?.displayOrder ?? index),
+        isActive: subcategory?.isActive === undefined ? true : Boolean(subcategory?.isActive),
+      }))
+    : [],
+  metadata: payload.metadata || {},
+});
+
+const mapCategory = (category) => ({
+  id: category._id,
+  sourceId: category.sourceId,
+  name: category.name,
+  slug: category.slug,
+  icon: category.icon,
+  description: category.description,
+  displayOrder: category.displayOrder,
+  isActive: category.isActive,
+  image: category.image || { url: "", publicId: "" },
+  subcategories: category.subcategories || [],
+  metadata: category.metadata || {},
+  createdAt: category.createdAt,
+  updatedAt: category.updatedAt,
+});
+
+const mapProduct = (product) => ({
+  id: product._id,
+  sourceId: product.sourceId,
+  name: product.name,
+  slug: product.slug,
+  sku: product.sku,
+  category: product.category?._id || product.category,
+  mainCategory: product.mainCategory || product.categoryName,
+  subCategory: product.subCategory || product.subcategoryName,
+  categoryName: product.categoryName,
+  categoryIcon: product.categoryIcon,
+  subcategoryId: product.subcategoryId,
+  subcategoryName: product.subcategoryName,
+  subcategorySlug: product.subcategorySlug,
+  brand: product.brand,
+  price: product.price,
+  offerPrice: product.offerPrice,
+  pricingTiers: product.pricingTiers || [],
+  customizationOptions: product.customizationOptions || [],
+  shipping: product.shipping,
+  description: product.description,
+  image: product.image || { url: "", publicId: "" },
+  images: product.images || [],
+  keyAttributes: product.keyAttributes || {},
+  packagingAndDelivery: product.packagingAndDelivery || {},
+  priceSource: product.priceSource,
+  userReviews: product.userReviews || [],
+  tags: product.tags || [],
+  isFeatured: product.isFeatured,
+  isActive: product.isActive,
+  metadata: product.metadata || {},
+  createdAt: product.createdAt,
+  updatedAt: product.updatedAt,
+});
+
+const buildQuery = (query = {}) => {
+  const filter = {};
+
+  if (query.search) {
+    const regex = { $regex: query.search, $options: "i" };
+    filter.$or = [
+      { name: regex },
+      { slug: regex },
+      { description: regex },
+      { mainCategory: regex },
+      { subCategory: regex },
+      { categoryName: regex },
+      { subcategoryName: regex },
+    ];
+  }
+
+  if (query.categoryId && mongoose.Types.ObjectId.isValid(query.categoryId)) {
+    filter.category = query.categoryId;
+  }
+
+  if (query.subcategoryId) {
+    filter.subcategoryId = normalizeNumber(query.subcategoryId);
+  }
+
+  if (query.isActive !== undefined) {
+    filter.isActive = query.isActive === "true" || query.isActive === true;
+  }
+
+  return filter;
+};
+
+const syncProductCategoryFields = async (productPayload) => {
+  const candidateCategoryId = productPayload.category && mongoose.Types.ObjectId.isValid(String(productPayload.category))
+    ? String(productPayload.category)
+    : "";
+
+  if (!candidateCategoryId && !productPayload.mainCategory && !productPayload.categoryName) {
+    return productPayload;
+  }
+
+  const category = candidateCategoryId
+    ? await Category.findById(candidateCategoryId)
+    : await Category.findOne({
+        $or: [
+          { name: productPayload.mainCategory },
+          { slug: slugifyText(productPayload.mainCategory) },
+          { name: productPayload.categoryName },
+          { slug: slugifyText(productPayload.categoryName) },
+        ],
+      });
+
+  if (!category) return productPayload;
+
+  const subcategory = category.subcategories.find((item) => String(item.id) === String(productPayload.subcategoryId));
+
+  return {
+    ...productPayload,
+    categoryName: category.name,
+    categoryIcon: category.icon,
+    mainCategory: category.name,
+    subCategory: subcategory?.name || productPayload.subCategory || productPayload.subcategoryName,
+    subcategoryName: subcategory?.name || productPayload.subcategoryName,
+    subcategorySlug: subcategory?.slug || productPayload.subcategorySlug,
+    category: category._id,
+  };
+};
+
+const uploadBufferToCloudinary = (buffer, filename) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: process.env.CLOUDINARY_CATALOG_FOLDER || "asian-import-export/catalog",
+        resource_type: "image",
+        overwrite: false,
+        quality: "auto:good",
+        fetch_format: "auto",
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve({
+          ...result,
+          optimizedUrl: buildOptimizedUrl(result.public_id, result.resource_type || "image"),
+          originalFilename: filename,
+        });
+      }
+    );
+
+    stream.end(buffer);
+  });
+
+const listCategories = async (_req, res) => {
+  try {
+    const categories = await Category.find().sort({ displayOrder: 1, createdAt: 1 });
+    res.json({ success: true, categories: categories.map(mapCategory) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const createCategory = async (req, res) => {
+  try {
+    const payload = normalizeCategoryPayload(req.body);
+    if (!payload.name) {
+      return res.status(400).json({ success: false, message: "Category name is required" });
+    }
+
+    const exists = await Category.findOne({ $or: [{ slug: payload.slug }, { name: payload.name }] });
+    if (exists) {
+      return res.status(409).json({ success: false, message: "Category already exists" });
+    }
+
+    const category = await Category.create(payload);
+    res.status(201).json({ success: true, category: mapCategory(category) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateCategory = async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+    const payload = normalizeCategoryPayload(req.body);
+
+    const category = await Category.findById(categoryId);
+    if (!category) {
+      return res.status(404).json({ success: false, message: "Category not found" });
+    }
+
+    category.name = payload.name || category.name;
+    category.slug = payload.slug || category.slug;
+    category.icon = payload.icon;
+    category.description = payload.description;
+    category.displayOrder = payload.displayOrder;
+    category.isActive = payload.isActive;
+    category.image = payload.image;
+    category.subcategories = payload.subcategories;
+    category.metadata = payload.metadata;
+
+    await category.save();
+    res.json({ success: true, category: mapCategory(category) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteCategory = async (req, res) => {
+  try {
+    const category = await Category.findById(req.params.categoryId);
+    if (!category) {
+      return res.status(404).json({ success: false, message: "Category not found" });
+    }
+
+    await Product.deleteMany({ category: category._id });
+    await category.deleteOne();
+    res.json({ success: true, message: "Category deleted" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const listProducts = async (req, res) => {
+  try {
+    const filter = buildQuery(req.query);
+    const products = await Product.find(filter).sort({ createdAt: -1 }).populate("category");
+    res.json({ success: true, products: products.map(mapProduct) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getProduct = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.productId).populate("category");
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    res.json({ success: true, product: mapProduct(product) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const createProduct = async (req, res) => {
+  try {
+    const payload = normalizeProductPayload(req.body);
+    if (!payload.name) {
+      return res.status(400).json({ success: false, message: "Product name is required" });
+    }
+
+    const resolvedPayload = await syncProductCategoryFields(payload);
+    if (!resolvedPayload.category) {
+      return res.status(400).json({ success: false, message: "Product main category is required" });
+    }
+
+    const product = await Product.create(resolvedPayload);
+    res.status(201).json({ success: true, product: mapProduct(product) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateProduct = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.productId);
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    const payload = await syncProductCategoryFields(normalizeProductPayload(req.body));
+    Object.assign(product, payload);
+    await product.save();
+
+    res.json({ success: true, product: mapProduct(product) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteProduct = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.productId);
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    await product.deleteOne();
+    res.json({ success: true, message: "Product deleted" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const listMedia = async (req, res) => {
+  try {
+    const search = String(req.query.search || "").trim();
+    const filter = search
+      ? {
+          $or: [
+            { originalFilename: { $regex: search, $options: "i" } },
+            { publicId: { $regex: search, $options: "i" } },
+            { folder: { $regex: search, $options: "i" } },
+          ],
+        }
+      : {};
+
+    const media = await MediaAsset.find(filter).sort({ createdAt: -1 });
+    res.json({ success: true, media });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const uploadMedia = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "Image file is required" });
+    }
+
+    const uploaded = await uploadBufferToCloudinary(req.file.buffer, req.file.originalname);
+    const metadata = req.body.metadata ? JSON.parse(req.body.metadata) : {};
+
+    const media = await MediaAsset.create({
+      publicId: uploaded.public_id,
+      assetType: uploaded.resource_type || "image",
+      format: uploaded.format || "",
+      originalFilename: uploaded.originalFilename || req.file.originalname,
+      url: uploaded.secure_url,
+      optimizedUrl: uploaded.optimizedUrl,
+      bytes: uploaded.bytes || 0,
+      width: uploaded.width || 0,
+      height: uploaded.height || 0,
+      folder: uploaded.folder || process.env.CLOUDINARY_CATALOG_FOLDER || "asian-import-export/catalog",
+      relatedType: req.body.relatedType || "",
+      relatedId: req.body.relatedId || "",
+      uploadedBy: {
+        id: String(req.authUser?._id || req.authUser?.id || ""),
+        name: String(req.authUser?.fullName || ""),
+        role: String(req.authUser?.role || ""),
+        email: String(req.authUser?.email || ""),
+      },
+      metadata,
+    });
+
+    res.status(201).json({ success: true, media });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteMedia = async (req, res) => {
+  try {
+    const publicId = decodeURIComponent(req.params.publicId);
+    const media = await MediaAsset.findOne({ publicId });
+
+    if (!media) {
+      return res.status(404).json({ success: false, message: "Media not found" });
+    }
+
+    await cloudinary.uploader.destroy(publicId, { resource_type: media.assetType || "image" });
+    await MediaAsset.deleteOne({ publicId });
+
+    await Product.updateMany(
+      { $or: [{ "image.publicId": publicId }, { "images.publicId": publicId }] },
+      {
+        $set: {
+          "image.url": "",
+          "image.publicId": "",
+        },
+        $pull: { images: { publicId } },
+      }
+    );
+
+    await Category.updateMany(
+      { "image.publicId": publicId },
+      {
+        $set: {
+          "image.url": "",
+          "image.publicId": "",
+        },
+      }
+    );
+
+    res.json({ success: true, message: "Media deleted" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const importCatalogFromJson = async (_req, res) => {
+  try {
+    const catalogPath = getFrontendCatalogPath();
+    const raw = await fs.readFile(catalogPath, "utf8");
+    const parsed = JSON.parse(raw);
+    const categories = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.categories) ? parsed.categories : [];
+
+    let categoryCount = 0;
+    let productCount = 0;
+
+    for (const sourceCategory of categories) {
+      const categoryPayload = normalizeCategoryPayload(sourceCategory);
+      categoryPayload.image = await uploadCatalogAsset(sourceCategory.image || sourceCategory.heroImage || "", sourceCategory.name);
+      const category = await Category.findOneAndUpdate(
+        { sourceId: categoryPayload.sourceId || sourceCategory.id, slug: categoryPayload.slug },
+        { $set: categoryPayload },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+
+      await upsertImportedMediaAsset({
+        asset: categoryPayload.image,
+        originalFilename: sourceCategory.name,
+        relatedType: "category-image",
+        relatedId: category._id,
+        metadata: { source: "catalog-import", categoryName: category.name },
+      });
+
+      categoryCount += 1;
+
+      for (const sourceSubcategory of sourceCategory.subcategories || []) {
+        for (const sourceProduct of sourceSubcategory.products || []) {
+          const productPayload = normalizeProductPayload({
+            ...sourceProduct,
+            category: category._id,
+            mainCategory: category.name,
+            categoryName: category.name,
+            categoryIcon: category.icon,
+            subcategoryId: sourceSubcategory.id,
+            subcategoryName: sourceSubcategory.name,
+            subCategory: sourceSubcategory.name,
+            subcategorySlug: slugifyText(sourceSubcategory.name),
+          });
+
+          productPayload.image = await uploadCatalogAsset(sourceProduct.image || "", sourceProduct.name);
+          productPayload.images = await Promise.all(
+            (sourceProduct.images || []).map((asset, index) =>
+              uploadCatalogAsset(asset, `${sourceProduct.name} ${index + 1}`)
+            )
+          );
+
+          const existingProduct = await Product.findOne({ sourceId: sourceProduct.id });
+          let product;
+          if (existingProduct) {
+            Object.assign(existingProduct, productPayload);
+            product = await existingProduct.save();
+          } else {
+            product = await Product.create(productPayload);
+          }
+
+          await upsertImportedMediaAsset({
+            asset: productPayload.image,
+            originalFilename: sourceProduct.name,
+            relatedType: "product-image",
+            relatedId: product._id,
+            metadata: {
+              source: "catalog-import",
+              categoryName: category.name,
+              subcategoryName: sourceSubcategory.name,
+              productName: sourceProduct.name,
+            },
+          });
+
+          for (const [index, galleryAsset] of (productPayload.images || []).entries()) {
+            await upsertImportedMediaAsset({
+              asset: galleryAsset,
+              originalFilename: `${sourceProduct.name} ${index + 1}`,
+              relatedType: "product-gallery",
+              relatedId: product._id,
+              metadata: {
+                source: "catalog-import",
+                categoryName: category.name,
+                subcategoryName: sourceSubcategory.name,
+                productName: sourceProduct.name,
+                index,
+              },
+            });
+          }
+
+          productCount += 1;
+        }
+      }
+    }
+
+    if (!categories.length && Array.isArray(parsed?.products)) {
+      for (const sourceProduct of parsed.products) {
+        const productPayload = normalizeProductPayload(sourceProduct);
+        if (!productPayload.name) continue;
+
+        productPayload.image = await uploadCatalogAsset(sourceProduct.image || "", sourceProduct.name);
+        productPayload.images = await Promise.all(
+          (sourceProduct.images || []).map((asset, index) =>
+            uploadCatalogAsset(asset, `${sourceProduct.name} ${index + 1}`)
+          )
+        );
+
+        const category = await Category.findOne({
+          $or: [
+            { name: sourceProduct.mainCategory },
+            { slug: slugifyText(sourceProduct.mainCategory) },
+          ],
+        });
+
+        if (category) {
+          productPayload.category = category._id;
+          productPayload.mainCategory = category.name;
+          productPayload.categoryName = category.name;
+          productPayload.categoryIcon = category.icon;
+
+          const subcategory = category.subcategories.find((item) => item.name === sourceProduct.subCategory || item.name === sourceProduct.subcategoryName);
+          productPayload.subcategoryId = subcategory?.id || productPayload.subcategoryId || 0;
+          productPayload.subcategoryName = subcategory?.name || productPayload.subCategory || productPayload.subcategoryName;
+          productPayload.subCategory = subcategory?.name || productPayload.subCategory || productPayload.subcategoryName;
+          productPayload.subcategorySlug = subcategory?.slug || productPayload.subcategorySlug || slugifyText(productPayload.subcategoryName);
+        }
+
+        const existingProduct = await Product.findOne({ sourceId: sourceProduct.id });
+        let product;
+        if (existingProduct) {
+          Object.assign(existingProduct, productPayload);
+          product = await existingProduct.save();
+        } else {
+          product = await Product.create(productPayload);
+        }
+
+        await upsertImportedMediaAsset({
+          asset: productPayload.image,
+          originalFilename: sourceProduct.name,
+          relatedType: "product-image",
+          relatedId: product._id,
+          metadata: {
+            source: "catalog-import",
+            categoryName: productPayload.categoryName,
+            subcategoryName: productPayload.subcategoryName,
+            productName: sourceProduct.name,
+          },
+        });
+
+        for (const [index, galleryAsset] of (productPayload.images || []).entries()) {
+          await upsertImportedMediaAsset({
+            asset: galleryAsset,
+            originalFilename: `${sourceProduct.name} ${index + 1}`,
+            relatedType: "product-gallery",
+            relatedId: product._id,
+            metadata: {
+              source: "catalog-import",
+              categoryName: productPayload.categoryName,
+              subcategoryName: productPayload.subcategoryName,
+              productName: sourceProduct.name,
+              index,
+            },
+          });
+        }
+
+        productCount += 1;
+      }
+    }
+
+    res.json({ success: true, message: "Catalog imported from JSON", categoryCount, productCount });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = {
+  uploadMiddleware: upload.single("file"),
+  listCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  listProducts,
+  getProduct,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  listMedia,
+  uploadMedia,
+  deleteMedia,
+  importCatalogFromJson,
+  normalizeCategoryPayload,
+  normalizeProductPayload,
+  mapCategory,
+  mapProduct,
+};

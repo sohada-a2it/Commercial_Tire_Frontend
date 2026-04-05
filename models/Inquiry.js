@@ -11,6 +11,10 @@ const inquiryItemSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    title: {
+      type: String,
+      trim: true,
+    },
     image: {
       type: String,
       trim: true,
@@ -23,6 +27,11 @@ const inquiryItemSchema = new mongoose.Schema(
     unitPrice: {
       type: Number,
       required: true,
+      min: 0,
+    },
+    discount: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     lineTotal: {
@@ -89,27 +98,9 @@ const inquirySchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: [
-        "new",
-        "quoted",
-        "quote_accepted",
-        "invoice_created",
-        "closed",
-        "cancelled",
-      ],
-      default: "new",
+      enum: ["in_process", "invoice_sent", "cancelled"],
+      default: "in_process",
       index: true,
-    },
-    quote: {
-      amount: { type: Number, min: 0 },
-      currency: { type: String, trim: true, default: "USD" },
-      notes: { type: String, trim: true },
-      quotedAt: { type: Date },
-      quotedByName: { type: String, trim: true },
-      quotedByEmail: { type: String, trim: true, lowercase: true },
-    },
-    quoteAcceptedAt: {
-      type: Date,
     },
     contactChannel: {
       type: String,

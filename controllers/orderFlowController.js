@@ -1,4 +1,6 @@
 const mongoose = require("mongoose");
+const nodemailer = require("nodemailer");
+const PDFDocument = require("pdfkit");
 const Inquiry = require("../models/Inquiry");
 const Invoice = require("../models/Invoice");
 const User = require("../models/User");
@@ -27,6 +29,17 @@ const parseMoney = (value) => {
   return 0;
 };
 
+const sanitizeText = (value, fallback = "") => {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim();
+  return normalized || fallback;
+};
+
+const parseDiscount = (value) => {
+  const amount = parseMoney(value);
+  return amount >= 0 ? amount : 0;
+};
+
 const toLineItem = (item = {}) => {
   const quantity = Number(item.quantity || 0);
   const inferredLineTotal = parseMoney(item.lineTotal ?? item.total ?? item.calculatedPrice);
@@ -34,14 +47,19 @@ const toLineItem = (item = {}) => {
   const unitPrice = parseMoney(
     unitPriceCandidate ?? (quantity > 0 && inferredLineTotal > 0 ? inferredLineTotal / quantity : 0)
   );
-  const lineTotal = inferredLineTotal > 0 ? inferredLineTotal : quantity * unitPrice;
+  const discount = parseDiscount(item.discount);
+  const grossLineTotal = quantity * unitPrice;
+  const lineTotal =
+    inferredLineTotal > 0 ? inferredLineTotal : Math.max(grossLineTotal - discount, 0);
 
   return {
     productId: item.productId ? String(item.productId) : item.id ? String(item.id) : "",
-    name: String(item.name || "").trim(),
+    name: sanitizeText(String(item.name || "")),
+    title: sanitizeText(String(item.title || item.name || "")),
     image: item.image ? String(item.image) : "",
     quantity,
     unitPrice,
+    discount,
     lineTotal,
   };
 };
@@ -69,6 +87,243 @@ const summarizePaymentStatus = (total, paidAmount) => {
   return "partial";
 };
 
+const toPaymentMethod = (method) => (method === "credit-card" ? "credit-card" : "bank");
+
+const normalizeCustomerSnapshot = ({ customer = {}, authUser = null, fallback = null }) => {
+  const source = customer || {};
+  const fallbackSource = fallback || {};
+
+  const normalized = {
+    name: sanitizeText(source.name, sanitizeText(fallbackSource.name, sanitizeText(authUser?.fullName || ""))),
+    email: sanitizeText(source.email, sanitizeText(fallbackSource.email, sanitizeText(authUser?.email || ""))).toLowerCase(),
+    phone: sanitizeText(source.phone, sanitizeText(fallbackSource.phone, sanitizeText(authUser?.whatsappNumber || ""))),
+    companyName: sanitizeText(
+      source.companyName,
+      sanitizeText(fallbackSource.companyName, sanitizeText(authUser?.companyName || ""))
+    ),
+    address: sanitizeText(source.address, sanitizeText(fallbackSource.address, "")),
+    city: sanitizeText(source.city, sanitizeText(fallbackSource.city, "")),
+    state: sanitizeText(source.state, sanitizeText(fallbackSource.state, "")),
+    zipCode: sanitizeText(source.zipCode, sanitizeText(fallbackSource.zipCode, "")),
+    notes: sanitizeText(source.notes, sanitizeText(fallbackSource.notes, "")),
+    whatsappNumber: sanitizeText(
+      source.whatsappNumber,
+      sanitizeText(fallbackSource.whatsappNumber, sanitizeText(authUser?.whatsappNumber || ""))
+    ),
+    paymentMethod: toPaymentMethod(source.paymentMethod || fallbackSource.paymentMethod),
+  };
+
+  return normalized;
+};
+
+const requiredCustomerFields = [
+  "name",
+  "email",
+  "phone",
+  "address",
+  "city",
+  "state",
+  "zipCode",
+];
+
+const validateCustomerSnapshot = (snapshot) => {
+  for (const field of requiredCustomerFields) {
+    if (!snapshot?.[field] || !String(snapshot[field]).trim()) {
+      return field;
+    }
+  }
+
+  return null;
+};
+
+const paymentMethodLabel = (method) => (method === "credit-card" ? "Credit Card" : "Bank Transfer");
+
+const createTransporter = () => {
+  const host = process.env.SMTP_HOST || "smtp.hostinger.com";
+  const port = Number(process.env.SMTP_PORT || 465);
+  const user = process.env.SMTP_USER || process.env.OWNER_EMAIL;
+  const pass = process.env.SMTP_PASSWORD;
+
+  if (!user || !pass) {
+    return null;
+  }
+
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: true,
+    auth: { user, pass },
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
+};
+
+const toPdfCurrency = (value) => `$${Number(value || 0).toFixed(2)}`;
+
+const generateInvoicePdfBuffer = (invoice) =>
+  new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 50 });
+    const chunks = [];
+
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const y0 = 50;
+    doc.fontSize(20).text("Invoice", 50, y0);
+    doc
+      .fontSize(11)
+      .text(`Invoice Number: ${invoice.invoiceNumber}`, 50, y0 + 30)
+      .text(`Inquiry ID: ${invoice.inquiry}`, 50, y0 + 48)
+      .text(`Issued: ${new Date(invoice.issuedAt || invoice.createdAt).toLocaleString()}`, 50, y0 + 66);
+
+    doc
+      .fontSize(11)
+      .text("Customer", 50, y0 + 100)
+      .text(invoice.customerSnapshot.name || "", 50, y0 + 118)
+      .text(invoice.customerSnapshot.email || "", 50, y0 + 136)
+      .text(invoice.customerSnapshot.phone || "", 50, y0 + 154)
+      .text(invoice.customerSnapshot.address || "", 50, y0 + 172)
+      .text(
+        `${invoice.customerSnapshot.city || ""}, ${invoice.customerSnapshot.state || ""} ${invoice.customerSnapshot.zipCode || ""}`,
+        50,
+        y0 + 190
+      )
+      .text(
+        `Payment Method: ${paymentMethodLabel(invoice.customerSnapshot.paymentMethod || "bank")}`,
+        50,
+        y0 + 208
+      );
+
+    let currentY = y0 + 245;
+    doc.fontSize(11).text("Items", 50, currentY);
+    currentY += 20;
+
+    doc
+      .fontSize(10)
+      .text("Name", 50, currentY)
+      .text("Qty", 290, currentY)
+      .text("Unit", 340, currentY)
+      .text("Discount", 410, currentY)
+      .text("Total", 490, currentY);
+
+    currentY += 16;
+
+    (invoice.items || []).forEach((item) => {
+      const name = sanitizeText(item.title || item.name || "", "Item");
+      doc
+        .fontSize(10)
+        .text(name, 50, currentY, { width: 230 })
+        .text(String(item.quantity || 0), 290, currentY)
+        .text(toPdfCurrency(item.unitPrice), 340, currentY)
+        .text(toPdfCurrency(item.discount), 410, currentY)
+        .text(toPdfCurrency(item.lineTotal), 490, currentY);
+      currentY += 20;
+
+      if (currentY > 720) {
+        doc.addPage();
+        currentY = 60;
+      }
+    });
+
+    currentY += 12;
+    doc
+      .fontSize(11)
+      .text(`Subtotal: ${toPdfCurrency(invoice.subtotal)}`, 370, currentY)
+      .text(`Total: ${toPdfCurrency(invoice.total)}`, 370, currentY + 18)
+      .text(`Paid: ${toPdfCurrency(invoice.paidAmount)}`, 370, currentY + 36)
+      .text(`Balance Due: ${toPdfCurrency(invoice.balanceDue)}`, 370, currentY + 54)
+      .text(`Payment Status: ${String(invoice.paymentStatus || "unpaid").toUpperCase()}`, 370, currentY + 72);
+
+    if (invoice.notes) {
+      doc.fontSize(11).text("Notes", 50, currentY + 36).fontSize(10).text(invoice.notes, 50, currentY + 54, {
+        width: 290,
+      });
+    }
+
+    doc.end();
+  });
+
+const sendInvoiceEmail = async (invoice) => {
+  const transporter = createTransporter();
+
+  if (!transporter) {
+    return {
+      sent: false,
+      message: "SMTP credentials not configured",
+    };
+  }
+
+  const pdfBuffer = await generateInvoicePdfBuffer(invoice);
+  const customer = invoice.customerSnapshot;
+  const rows = (invoice.items || [])
+    .map(
+      (item) => `
+        <tr>
+          <td style="border:1px solid #ddd;padding:8px;">${item.title || item.name}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:center;">${item.quantity}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:right;">$${Number(item.unitPrice || 0).toFixed(2)}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:right;">$${Number(item.discount || 0).toFixed(2)}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:right;">$${Number(item.lineTotal || 0).toFixed(2)}</td>
+        </tr>
+      `
+    )
+    .join("");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;color:#1f2937;">
+      <h2 style="margin-bottom:8px;">Invoice ${invoice.invoiceNumber}</h2>
+      <p style="margin-top:0;">Hello ${customer.name}, your invoice is ready. A PDF copy is attached.</p>
+
+      <div style="background:#f8fafc;border:1px solid #e5e7eb;padding:12px;border-radius:6px;margin:16px 0;">
+        <p style="margin:0 0 6px 0;"><strong>Payment Method:</strong> ${paymentMethodLabel(
+          customer.paymentMethod
+        )}</p>
+        <p style="margin:0;"><strong>Payment Status:</strong> ${String(invoice.paymentStatus || "unpaid")}</p>
+      </div>
+
+      <table style="border-collapse:collapse;width:100%;margin:12px 0;">
+        <thead>
+          <tr style="background:#0f766e;color:#fff;">
+            <th style="border:1px solid #0f766e;padding:8px;text-align:left;">Product</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:center;">Qty</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Unit</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Discount</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+
+      <p><strong>Total:</strong> $${Number(invoice.total || 0).toFixed(2)}<br/>
+      <strong>Paid:</strong> $${Number(invoice.paidAmount || 0).toFixed(2)}<br/>
+      <strong>Balance Due:</strong> $${Number(invoice.balanceDue || 0).toFixed(2)}</p>
+
+      ${invoice.notes ? `<p><strong>Notes:</strong> ${invoice.notes}</p>` : ""}
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: `"Asian Import Export Co" <${process.env.SMTP_USER || process.env.OWNER_EMAIL}>`,
+    to: customer.email,
+    cc: process.env.OWNER_EMAIL || undefined,
+    subject: `Invoice ${invoice.invoiceNumber} from Asian Import Export`,
+    html,
+    attachments: [
+      {
+        filename: `${invoice.invoiceNumber}.pdf`,
+        content: pdfBuffer,
+      },
+    ],
+  });
+
+  return {
+    sent: true,
+    message: "Invoice email sent",
+  };
+};
+
 const mapInquiry = (inquiry) => ({
   id: inquiry._id,
   inquiryNumber: inquiry.inquiryNumber,
@@ -80,8 +335,6 @@ const mapInquiry = (inquiry) => ({
   currency: inquiry.currency,
   paymentMethod: inquiry.paymentMethod,
   status: inquiry.status,
-  quote: inquiry.quote,
-  quoteAcceptedAt: inquiry.quoteAcceptedAt,
   contactChannel: inquiry.contactChannel,
   internalNotes: inquiry.internalNotes,
   payment: inquiry.payment,
@@ -131,23 +384,14 @@ const placeOrderInquiry = async (req, res) => {
       });
     }
 
-    const requiredCustomerFields = [
-      "name",
-      "email",
-      "phone",
-      "address",
-      "city",
-      "state",
-      "zipCode",
-    ];
+    const customerSnapshot = normalizeCustomerSnapshot({ customer, authUser });
+    const missingField = validateCustomerSnapshot(customerSnapshot);
 
-    for (const field of requiredCustomerFields) {
-      if (!customer?.[field] || !String(customer[field]).trim()) {
-        return res.status(400).json({
-          success: false,
-          message: `Missing customer field: ${field}`,
-        });
-      }
+    if (missingField) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing customer field: ${missingField}`,
+      });
     }
 
     const subtotal = lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
@@ -156,24 +400,13 @@ const placeOrderInquiry = async (req, res) => {
     const inquiry = await Inquiry.create({
       inquiryNumber: generateCode("INQ"),
       customer: authUser._id,
-      customerSnapshot: {
-        name: String(customer.name).trim(),
-        email: String(customer.email).trim().toLowerCase(),
-        phone: String(customer.phone).trim(),
-        companyName: authUser.companyName || "",
-        address: String(customer.address).trim(),
-        city: String(customer.city).trim(),
-        state: String(customer.state).trim(),
-        zipCode: String(customer.zipCode).trim(),
-        notes: customer.notes ? String(customer.notes).trim() : "",
-        whatsappNumber: authUser.whatsappNumber || "",
-      },
+      customerSnapshot,
       items: lineItems,
       subtotal,
       total,
       currency,
       paymentMethod: paymentMethod === "credit-card" ? "credit-card" : "bank",
-      status: "new",
+      status: "in_process",
     });
 
     return res.status(201).json({
@@ -235,17 +468,9 @@ const updateInquiryStatus = async (req, res) => {
     }
 
     const { inquiryId } = req.params;
-    const { status, internalNotes, contactChannel, paidAmount, paymentNotes } = req.body;
+    const { status, internalNotes, contactChannel } = req.body;
 
-    const allowedStatuses = [
-      "new",
-      "quoted",
-      "quote_accepted",
-      "invoice_created",
-      "closed",
-      "cancelled",
-    ];
-
+    const allowedStatuses = ["in_process", "invoice_sent", "cancelled"];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: "Invalid inquiry status" });
     }
@@ -265,17 +490,6 @@ const updateInquiryStatus = async (req, res) => {
       inquiry.contactChannel = contactChannel;
     }
 
-    if (typeof paidAmount !== "undefined") {
-      const normalizedPaidAmount = Math.max(Number(paidAmount) || 0, 0);
-      inquiry.payment.paidAmount = normalizedPaidAmount;
-      inquiry.payment.confirmed = normalizedPaidAmount > 0;
-      inquiry.payment.confirmedAt = normalizedPaidAmount > 0 ? new Date() : null;
-    }
-
-    if (typeof paymentNotes === "string") {
-      inquiry.payment.notes = paymentNotes.trim();
-    }
-
     await inquiry.save();
 
     return res.status(200).json({
@@ -286,80 +500,6 @@ const updateInquiryStatus = async (req, res) => {
   } catch (error) {
     console.error("Update inquiry status error:", error);
     return res.status(500).json({ success: false, message: "Failed to update inquiry status" });
-  }
-};
-
-const markInquiryQuoted = async (req, res) => {
-  try {
-    if (!isStaffRole(req.authUser?.role)) {
-      return res.status(403).json({ success: false, message: "Staff access required" });
-    }
-
-    const { inquiryId } = req.params;
-    const { amount, currency = "USD", notes = "" } = req.body;
-    const quoteAmount = Number(amount);
-
-    if (!Number.isFinite(quoteAmount) || quoteAmount < 0) {
-      return res.status(400).json({ success: false, message: "Invalid quote amount" });
-    }
-
-    const inquiry = await Inquiry.findById(inquiryId);
-    if (!inquiry) {
-      return res.status(404).json({ success: false, message: "Inquiry not found" });
-    }
-
-    inquiry.status = "quoted";
-    inquiry.quote = {
-      amount: quoteAmount,
-      currency: String(currency || "USD").trim(),
-      notes: String(notes || "").trim(),
-      quotedAt: new Date(),
-      quotedByName: req.authUser?.fullName || "",
-      quotedByEmail: req.authUser?.email || "",
-    };
-
-    await inquiry.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Inquiry marked as quoted",
-      inquiry: mapInquiry(inquiry),
-    });
-  } catch (error) {
-    console.error("Mark inquiry quoted error:", error);
-    return res.status(500).json({ success: false, message: "Failed to update quote" });
-  }
-};
-
-const acceptQuote = async (req, res) => {
-  try {
-    const { inquiryId } = req.params;
-    const inquiry = await Inquiry.findById(inquiryId);
-
-    if (!inquiry) {
-      return res.status(404).json({ success: false, message: "Inquiry not found" });
-    }
-
-    if (String(inquiry.customer) !== String(req.authUser._id)) {
-      return res.status(403).json({ success: false, message: "You can only update your own inquiry" });
-    }
-
-    if (inquiry.status !== "quoted") {
-      return res.status(400).json({ success: false, message: "Only quoted inquiries can be accepted" });
-    }
-
-    inquiry.status = "quote_accepted";
-    inquiry.quoteAcceptedAt = new Date();
-    await inquiry.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Quote accepted successfully",
-      inquiry: mapInquiry(inquiry),
-    });
-  } catch (error) {
-    console.error("Accept quote error:", error);
-    return res.status(500).json({ success: false, message: "Failed to accept quote" });
   }
 };
 
@@ -374,7 +514,14 @@ const createInvoiceFromInquiry = async (req, res) => {
       return res.status(403).json({ success: false, message: "Admin access required" });
     }
 
-    const { inquiryId, items, paidAmount = 0, notes = "", currency = "USD" } = req.body;
+    const {
+      inquiryId,
+      items,
+      customer = {},
+      paidAmount = 0,
+      notes = "",
+      currency = "USD",
+    } = req.body;
 
     if (!inquiryId || !mongoose.Types.ObjectId.isValid(inquiryId)) {
       await session.abortTransaction();
@@ -402,6 +549,23 @@ const createInvoiceFromInquiry = async (req, res) => {
       return res.status(400).json({ success: false, message: "At least one valid invoice item is required" });
     }
 
+    const customerSnapshot = normalizeCustomerSnapshot({
+      customer,
+      fallback: {
+        ...inquiry.customerSnapshot,
+        paymentMethod: inquiry.paymentMethod,
+      },
+    });
+    const missingCustomerField = validateCustomerSnapshot(customerSnapshot);
+    if (missingCustomerField) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Missing customer field: ${missingCustomerField}`,
+      });
+    }
+
     const subtotal = invoiceItems.reduce((sum, item) => sum + item.lineTotal, 0);
     const total = subtotal;
     const normalizedPaidAmount = Math.max(Number(paidAmount) || 0, 0);
@@ -413,16 +577,7 @@ const createInvoiceFromInquiry = async (req, res) => {
           invoiceNumber: generateCode("INV"),
           inquiry: inquiry._id,
           customer: inquiry.customer,
-          customerSnapshot: {
-            name: inquiry.customerSnapshot.name,
-            email: inquiry.customerSnapshot.email,
-            phone: inquiry.customerSnapshot.phone,
-            companyName: inquiry.customerSnapshot.companyName,
-            address: inquiry.customerSnapshot.address,
-            city: inquiry.customerSnapshot.city,
-            state: inquiry.customerSnapshot.state,
-            zipCode: inquiry.customerSnapshot.zipCode,
-          },
+          customerSnapshot,
           items: invoiceItems,
           subtotal,
           total,
@@ -442,7 +597,7 @@ const createInvoiceFromInquiry = async (req, res) => {
       { session }
     );
 
-    inquiry.status = "invoice_created";
+    inquiry.status = "invoice_sent";
     inquiry.linkedInvoice = invoice[0]._id;
     inquiry.payment.paidAmount = normalizedPaidAmount;
     inquiry.payment.confirmed = normalizedPaidAmount > 0;
@@ -452,17 +607,62 @@ const createInvoiceFromInquiry = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    let emailDelivery = {
+      sent: false,
+      message: "Email not attempted",
+    };
+    try {
+      emailDelivery = await sendInvoiceEmail(invoice[0]);
+    } catch (emailError) {
+      emailDelivery = {
+        sent: false,
+        message: emailError.message || "Failed to send invoice email",
+      };
+      console.error("Invoice email send error:", emailError);
+    }
+
     return res.status(201).json({
       success: true,
       message: "Invoice created successfully",
       invoice: mapInvoice(invoice[0]),
       inquiry: mapInquiry(inquiry),
+      emailDelivery,
     });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
     console.error("Create invoice error:", error);
     return res.status(500).json({ success: false, message: "Failed to create invoice", error: error.message });
+  }
+};
+
+const downloadInvoicePdf = async (req, res) => {
+  try {
+    const { invoiceId } = req.params;
+    if (!invoiceId || !mongoose.Types.ObjectId.isValid(invoiceId)) {
+      return res.status(400).json({ success: false, message: "Valid invoiceId is required" });
+    }
+
+    const invoice = await Invoice.findById(invoiceId).lean();
+    if (!invoice) {
+      return res.status(404).json({ success: false, message: "Invoice not found" });
+    }
+
+    const isOwner = String(invoice.customer) === String(req.authUser?._id);
+    const isStaff = isStaffRole(req.authUser?.role);
+
+    if (!isOwner && !isStaff) {
+      return res.status(403).json({ success: false, message: "Not allowed to download this invoice" });
+    }
+
+    const pdfBuffer = await generateInvoicePdfBuffer(invoice);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=\"${invoice.invoiceNumber}.pdf\"`);
+    return res.status(200).send(pdfBuffer);
+  } catch (error) {
+    console.error("Download invoice PDF error:", error);
+    return res.status(500).json({ success: false, message: "Failed to download invoice PDF" });
   }
 };
 
@@ -515,9 +715,8 @@ module.exports = {
   getMyInquiries,
   getAllInquiries,
   updateInquiryStatus,
-  markInquiryQuoted,
-  acceptQuote,
   createInvoiceFromInquiry,
   getMyInvoices,
   getAllInvoices,
+  downloadInvoicePdf,
 };

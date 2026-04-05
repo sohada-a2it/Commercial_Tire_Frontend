@@ -11,6 +11,10 @@ const invoiceItemSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    title: {
+      type: String,
+      trim: true,
+    },
     image: {
       type: String,
       trim: true,
@@ -23,6 +27,11 @@ const invoiceItemSchema = new mongoose.Schema(
     unitPrice: {
       type: Number,
       required: true,
+      min: 0,
+    },
+    discount: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     lineTotal: {
@@ -64,6 +73,12 @@ const invoiceSchema = new mongoose.Schema(
       city: { type: String, trim: true },
       state: { type: String, trim: true },
       zipCode: { type: String, trim: true },
+      notes: { type: String, trim: true },
+      paymentMethod: {
+        type: String,
+        enum: ["credit-card", "bank"],
+        default: "bank",
+      },
     },
     items: {
       type: [invoiceItemSchema],

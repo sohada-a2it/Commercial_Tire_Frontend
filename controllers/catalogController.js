@@ -378,6 +378,26 @@ const syncProductCategoryFields = async (productPayload) => {
   };
 };
 
+const findProductByRouteId = async (routeId, { populate = false } = {}) => {
+  const value = String(routeId || "").trim();
+  if (!value) return null;
+
+  const numericSourceId = Number.parseInt(value, 10);
+  const candidates = [];
+
+  if (mongoose.Types.ObjectId.isValid(value)) {
+    candidates.push({ _id: value });
+  }
+  if (Number.isFinite(numericSourceId)) {
+    candidates.push({ sourceId: numericSourceId });
+  }
+  if (!candidates.length) return null;
+
+  let query = Product.findOne(candidates.length === 1 ? candidates[0] : { $or: candidates });
+  if (populate) query = query.populate("category");
+  return query;
+};
+
 const uploadBufferToCloudinary = (buffer, filename) =>
   new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
@@ -601,7 +621,7 @@ const listProducts = async (req, res) => {
 
 const getProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.productId).populate("category");
+    const product = await findProductByRouteId(req.params.productId, { populate: true });
     if (!product) {
       return res.status(404).json({ success: false, message: "Product not found" });
     }
@@ -633,7 +653,7 @@ const createProduct = async (req, res) => {
 
 const updateProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.productId);
+    const product = await findProductByRouteId(req.params.productId);
     if (!product) {
       return res.status(404).json({ success: false, message: "Product not found" });
     }
@@ -650,7 +670,7 @@ const updateProduct = async (req, res) => {
 
 const deleteProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.productId);
+    const product = await findProductByRouteId(req.params.productId);
     if (!product) {
       return res.status(404).json({ success: false, message: "Product not found" });
     }

@@ -292,24 +292,40 @@ const generateInvoicePdfBuffer = (invoice) =>
         labelSize = 9,
         valueSize = 9.5,
         multiline = false,
+        labelColor = "#111827",
+        valueColor = "#111827",
+        labelFont = "Helvetica-Bold",
+        valueFont = "Helvetica",
+        borders = { top: true, right: true, bottom: true, left: true },
       } = options;
 
-      doc.rect(x, y, w, h).stroke();
       if (bg) {
         doc.save();
         doc.rect(x, y, w, h).fill(bg);
         doc.restore();
-        doc.rect(x, y, w, h).stroke();
+      }
+
+      if (borders.top) {
+        doc.moveTo(x, y).lineTo(x + w, y).stroke();
+      }
+      if (borders.right) {
+        doc.moveTo(x + w, y).lineTo(x + w, y + h).stroke();
+      }
+      if (borders.bottom) {
+        doc.moveTo(x, y + h).lineTo(x + w, y + h).stroke();
+      }
+      if (borders.left) {
+        doc.moveTo(x, y).lineTo(x, y + h).stroke();
       }
       if (label) {
-        doc.font("Helvetica-Bold").fontSize(labelSize).text(label, x + 6, y + 5, {
+        doc.fillColor(labelColor).font(labelFont).fontSize(labelSize).text(label, x + 6, y + 5, {
           width: w - 12,
           align,
           lineBreak: true,
         });
       }
       if (value !== undefined && value !== null) {
-        doc.font("Helvetica").fontSize(valueSize).text(String(value), x + 6, y + (label ? 18 : 8), {
+        doc.fillColor(valueColor).font(valueFont).fontSize(valueSize).text(String(value), x + 6, y + (label ? 18 : 8), {
           width: w - 12,
           height: h - (label ? 20 : 8),
           align,
@@ -330,7 +346,7 @@ const generateInvoicePdfBuffer = (invoice) =>
     y += 44;
 
     drawCell(tableX, y, tableWidth, 32, "", "");
-    doc.font("Helvetica-Bold").fontSize(12).text("Proforma Invoice", tableX, y + 8, {
+    doc.font("Helvetica-Bold").fontSize(14).text("Proforma Invoice", tableX, y + 8, {
       width: tableWidth,
       align: "center",
     });
@@ -387,7 +403,7 @@ const generateInvoicePdfBuffer = (invoice) =>
     drawDualRow("Port of Loading:", portOfLoading, "Delivery Address:", deliveryAddress, 34);
 
     drawCell(tableX, y, tableWidth, 30, "", "");
-    doc.font("Helvetica-Bold").fontSize(11).text("Product Description:", tableX, y + 8, {
+    doc.font("Helvetica-Bold").fontSize(14).text("Product Description:", tableX, y + 8, {
       width: tableWidth,
       align: "center",
     });
@@ -438,16 +454,27 @@ const generateInvoicePdfBuffer = (invoice) =>
       summaryHeight,
       "",
       `Total (${Number(invoice.discountRate || 0).toFixed(1)}%\nDiscount Added):`,
-      { multiline: true, valueSize: 9.5 }
+      {
+        multiline: true,
+        valueSize: 12,
+        valueFont: "Helvetica-Bold",
+        valueColor: "#f97316",
+        bg: "#dbeafe",
+        borders: { top: true, right: true, bottom: true, left: false },
+      }
     );
     drawCell(tableX + leftWidth + rightWidth * 0.5, y, rightWidth * 0.5, summaryHeight, "", toPdfCurrency(invoice.total), {
-      valueSize: 12,
+      valueSize: 14,
+      valueFont: "Helvetica-Bold",
+      bg: "#dbeafe",
     });
     y += summaryHeight;
 
     const bottomHeight = Math.max(pageHeight - margin - y, 60);
     drawCell(tableX, y, tableWidth - 140, bottomHeight, "", "");
-    drawCell(tableX + tableWidth - 140, y, 140, bottomHeight, "", `Incoterms: ${incoterms || "N/A"}`);
+    drawCell(tableX + tableWidth - 140, y, 140, bottomHeight, "", `Incoterms: ${incoterms || "N/A"}`, {
+      borders: { top: true, right: true, bottom: true, left: false },
+    });
 
     doc.end();
   });

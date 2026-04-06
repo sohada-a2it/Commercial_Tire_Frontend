@@ -22,6 +22,7 @@ const allowedOrigins = [
   "http://127.0.0.1:3000",
   "https://asianimportexport.com",
   "https://www.asianimportexport.com",
+  "https://asian-import-export-co-backend.vercel.app",
 ].filter(Boolean);
 
 app.use(

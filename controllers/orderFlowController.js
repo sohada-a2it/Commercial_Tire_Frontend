@@ -233,6 +233,8 @@ const toDateLabel = (value, fallbackDate = new Date()) => {
 
 const getLogoPath = () => {
   const candidates = [
+    path.resolve(__dirname, "../../Asian.Import.Export.Co.Frontend/public/logo.png"),
+    path.resolve(__dirname, "../public/logo.png"),
     path.resolve(__dirname, "../../Asian.Import.Export.Co.Frontend/public/logo.webp"),
     path.resolve(__dirname, "../public/logo.webp"),
   ];
@@ -265,15 +267,21 @@ const generateInvoicePdfBuffer = (invoice) =>
 
     const logoPath = getLogoPath();
     if (logoPath) {
+      doc.save();
       try {
-        doc.save();
         doc.fillOpacity(0.08);
         doc.image(logoPath, pageWidth / 2 - 155, pageHeight / 2 - 155, { width: 310 });
-        doc.restore();
       } catch (logoError) {
         // Some PDFKit builds cannot decode webp; skip watermark instead of failing invoice download.
+      } finally {
+        doc.restore();
       }
     }
+
+    doc.fillOpacity(1);
+    doc.strokeOpacity(1);
+    doc.fillColor("#111827");
+    doc.strokeColor("#111827");
 
     const drawCell = (x, y, w, h, label, value, options = {}) => {
       doc.rect(x, y, w, h).stroke();

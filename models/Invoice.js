@@ -15,6 +15,16 @@ const invoiceItemSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    brand: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    pattern: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     ply: {
       type: String,
       trim: true,

@@ -40,6 +40,13 @@ const parseDiscount = (value) => {
   return amount >= 0 ? amount : 0;
 };
 
+const roundCurrency = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+
+const sanitizePaymentMethod = (method, fallback = "bank") => {
+  const value = sanitizeText(method, "");
+  return value || fallback;
+};
+
 const toLineItem = (item = {}) => {
   const quantity = Number(item.quantity || 0);
   const inferredLineTotal = parseMoney(item.lineTotal ?? item.total ?? item.calculatedPrice);
@@ -83,11 +90,50 @@ const sanitizeItems = (items = []) => {
 
 const summarizePaymentStatus = (total, paidAmount) => {
   if (paidAmount <= 0) return "unpaid";
-  if (paidAmount >= total) return "paid";
+  if (paidAmount >= total) return "full";
   return "partial";
 };
 
-const toPaymentMethod = (method) => (method === "credit-card" ? "credit-card" : "bank");
+const toPaymentMethod = (method) => sanitizePaymentMethod(method, "bank");
+
+const paymentMethodLabel = (method) => {
+  const normalized = String(method || "bank").trim().toLowerCase();
+
+  switch (normalized) {
+    case "credit-card":
+      return "Credit Card";
+    case "bank":
+      return "Bank Transfer";
+    case "cash":
+      return "Cash";
+    case "cheque":
+      return "Cheque";
+    case "wire-transfer":
+      return "Wire Transfer";
+    case "mobile-banking":
+      return "Mobile Banking";
+    default:
+      return sanitizeText(method, "Bank Transfer");
+  }
+};
+
+const paymentStatusLabel = (status) => {
+  const normalized = String(status || "unpaid").trim().toLowerCase();
+
+  switch (normalized) {
+    case "due":
+      return "Due";
+    case "unpaid":
+      return "Unpaid";
+    case "partial":
+      return "Partial";
+    case "full":
+    case "paid":
+      return "Full";
+    default:
+      return normalized || "Unpaid";
+  }
+};
 
 const normalizeCustomerSnapshot = ({ customer = {}, authUser = null, fallback = null }) => {
   const source = customer || {};
@@ -135,8 +181,6 @@ const validateCustomerSnapshot = (snapshot) => {
 
   return null;
 };
-
-const paymentMethodLabel = (method) => (method === "credit-card" ? "Credit Card" : "Bank Transfer");
 
 const createTransporter = () => {
   const host = process.env.SMTP_HOST || "smtp.hostinger.com";
@@ -228,16 +272,51 @@ const generateInvoicePdfBuffer = (invoice) =>
     });
 
     currentY += 12;
+    doc.fontSize(11).text("Payment Breakdown", 50, currentY);
+    currentY += 18;
+
+    const breakdownRows = [
+      ["Product subtotal", invoice.productSubtotal],
+      ["VAT", invoice.vatAmount],
+      ["Discount", invoice.discountAmount ? -Math.abs(invoice.discountAmount) : 0],
+      ["Shipping", invoice.shippingCost],
+    ];
+
+    breakdownRows.forEach(([label, amount]) => {
+      doc.fontSize(10).text(`${label}: ${toPdfCurrency(amount)}`, 50, currentY);
+      currentY += 16;
+    });
+
     doc
       .fontSize(11)
-      .text(`Subtotal: ${toPdfCurrency(invoice.subtotal)}`, 370, currentY)
-      .text(`Total: ${toPdfCurrency(invoice.total)}`, 370, currentY + 18)
-      .text(`Paid: ${toPdfCurrency(invoice.paidAmount)}`, 370, currentY + 36)
-      .text(`Balance Due: ${toPdfCurrency(invoice.balanceDue)}`, 370, currentY + 54)
-      .text(`Payment Status: ${String(invoice.paymentStatus || "unpaid").toUpperCase()}`, 370, currentY + 72);
+      .text(`Subtotal: ${toPdfCurrency(invoice.subtotal)}`, 370, currentY - 64)
+      .text(`Total: ${toPdfCurrency(invoice.total)}`, 370, currentY - 46)
+      .text(`Paid: ${toPdfCurrency(invoice.paidAmount)}`, 370, currentY - 28)
+      .text(`Balance Due: ${toPdfCurrency(invoice.balanceDue)}`, 370, currentY - 10)
+      .text(`Payment Status: ${paymentStatusLabel(invoice.paymentStatus)}`, 370, currentY + 8);
+
+    const notesStartY = Math.max(currentY + 32, 640);
 
     if (invoice.notes) {
-      doc.fontSize(11).text("Notes", 50, currentY + 36).fontSize(10).text(invoice.notes, 50, currentY + 54, {
+      doc.fontSize(11).text("Notes", 50, notesStartY).fontSize(10).text(invoice.notes, 50, notesStartY + 18, {
+        width: 290,
+      });
+    }
+
+    if (invoice.extraNotes) {
+      doc.fontSize(11).text("Extra Notes", 50, notesStartY + 90).fontSize(10).text(invoice.extraNotes, 50, notesStartY + 108, {
+        width: 290,
+      });
+    }
+
+    if (invoice.termsAndConditions) {
+      doc.fontSize(11).text("Terms & Conditions", 50, notesStartY + 180).fontSize(10).text(invoice.termsAndConditions, 50, notesStartY + 198, {
+        width: 290,
+      });
+    }
+
+    if (invoice.additionalMessages) {
+      doc.fontSize(11).text("Additional Messages", 50, notesStartY + 270).fontSize(10).text(invoice.additionalMessages, 50, notesStartY + 288, {
         width: 290,
       });
     }
@@ -280,7 +359,7 @@ const sendInvoiceEmail = async (invoice) => {
         <p style="margin:0 0 6px 0;"><strong>Payment Method:</strong> ${paymentMethodLabel(
           customer.paymentMethod
         )}</p>
-        <p style="margin:0;"><strong>Payment Status:</strong> ${String(invoice.paymentStatus || "unpaid")}</p>
+        <p style="margin:0;"><strong>Payment Status:</strong> ${paymentStatusLabel(invoice.paymentStatus)}</p>
       </div>
 
       <table style="border-collapse:collapse;width:100%;margin:12px 0;">
@@ -296,11 +375,18 @@ const sendInvoiceEmail = async (invoice) => {
         <tbody>${rows}</tbody>
       </table>
 
-      <p><strong>Total:</strong> $${Number(invoice.total || 0).toFixed(2)}<br/>
+      <p><strong>Product subtotal:</strong> $${Number(invoice.productSubtotal || 0).toFixed(2)}<br/>
+      <strong>VAT:</strong> $${Number(invoice.vatAmount || 0).toFixed(2)}<br/>
+      <strong>Discount:</strong> -$${Number(invoice.discountAmount || 0).toFixed(2)}<br/>
+      <strong>Shipping:</strong> $${Number(invoice.shippingCost || 0).toFixed(2)}<br/>
+      <strong>Total:</strong> $${Number(invoice.total || 0).toFixed(2)}<br/>
       <strong>Paid:</strong> $${Number(invoice.paidAmount || 0).toFixed(2)}<br/>
       <strong>Balance Due:</strong> $${Number(invoice.balanceDue || 0).toFixed(2)}</p>
 
       ${invoice.notes ? `<p><strong>Notes:</strong> ${invoice.notes}</p>` : ""}
+      ${invoice.extraNotes ? `<p><strong>Extra Notes:</strong> ${invoice.extraNotes}</p>` : ""}
+      ${invoice.termsAndConditions ? `<p><strong>Terms & Conditions:</strong> ${invoice.termsAndConditions}</p>` : ""}
+      ${invoice.additionalMessages ? `<p><strong>Additional Messages:</strong> ${invoice.additionalMessages}</p>` : ""}
     </div>
   `;
 
@@ -351,6 +437,12 @@ const mapInvoice = (invoice) => ({
   customer: invoice.customerSnapshot,
   items: invoice.items,
   subtotal: invoice.subtotal,
+  productSubtotal: invoice.productSubtotal,
+  vatRate: invoice.vatRate,
+  vatAmount: invoice.vatAmount,
+  discountRate: invoice.discountRate,
+  discountAmount: invoice.discountAmount,
+  shippingCost: invoice.shippingCost,
   total: invoice.total,
   paidAmount: invoice.paidAmount,
   balanceDue: invoice.balanceDue,
@@ -358,6 +450,9 @@ const mapInvoice = (invoice) => ({
   currency: invoice.currency,
   invoiceStatus: invoice.invoiceStatus,
   notes: invoice.notes,
+  extraNotes: invoice.extraNotes,
+  termsAndConditions: invoice.termsAndConditions,
+  additionalMessages: invoice.additionalMessages,
   issuedAt: invoice.issuedAt,
   createdBy: invoice.createdBy,
   createdAt: invoice.createdAt,
@@ -461,6 +556,38 @@ const getAllInquiries = async (req, res) => {
   }
 };
 
+const deleteInquiry = async (req, res) => {
+  try {
+    if (req.authUser?.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Admin access required" });
+    }
+
+    const { inquiryId } = req.params;
+    if (!inquiryId || !mongoose.Types.ObjectId.isValid(inquiryId)) {
+      return res.status(400).json({ success: false, message: "Valid inquiryId is required" });
+    }
+
+    const inquiry = await Inquiry.findById(inquiryId);
+    if (!inquiry) {
+      return res.status(404).json({ success: false, message: "Inquiry not found" });
+    }
+
+    if (inquiry.linkedInvoice) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete an inquiry that already has an invoice",
+      });
+    }
+
+    await Inquiry.deleteOne({ _id: inquiryId });
+
+    return res.status(200).json({ success: true, message: "Inquiry deleted successfully" });
+  } catch (error) {
+    console.error("Delete inquiry error:", error);
+    return res.status(500).json({ success: false, message: "Failed to delete inquiry" });
+  }
+};
+
 const updateInquiryStatus = async (req, res) => {
   try {
     if (!isStaffRole(req.authUser?.role)) {
@@ -520,6 +647,13 @@ const createInvoiceFromInquiry = async (req, res) => {
       customer = {},
       paidAmount = 0,
       notes = "",
+      extraNotes = "",
+      termsAndConditions = "",
+      additionalMessages = "",
+      vatRate = 0,
+      discountRate = 0,
+      shippingCost = 0,
+      invoiceNumber,
       currency = "USD",
     } = req.body;
 
@@ -566,7 +700,13 @@ const createInvoiceFromInquiry = async (req, res) => {
       });
     }
 
-    const subtotal = invoiceItems.reduce((sum, item) => sum + item.lineTotal, 0);
+    const productSubtotal = roundCurrency(invoiceItems.reduce((sum, item) => sum + item.lineTotal, 0));
+    const normalizedVatRate = Math.max(Number(vatRate) || 0, 0);
+    const normalizedDiscountRate = Math.max(Number(discountRate) || 0, 0);
+    const normalizedShippingCost = Math.max(Number(shippingCost) || 0, 0);
+    const vatAmount = roundCurrency((productSubtotal * normalizedVatRate) / 100);
+    const discountAmount = roundCurrency((productSubtotal * normalizedDiscountRate) / 100);
+    const subtotal = roundCurrency(Math.max(productSubtotal + vatAmount - discountAmount + normalizedShippingCost, 0));
     const total = subtotal;
     const normalizedPaidAmount = Math.max(Number(paidAmount) || 0, 0);
     const balanceDue = Math.max(total - normalizedPaidAmount, 0);
@@ -574,11 +714,17 @@ const createInvoiceFromInquiry = async (req, res) => {
     const invoice = await Invoice.create(
       [
         {
-          invoiceNumber: generateCode("INV"),
+          invoiceNumber: sanitizeText(invoiceNumber, generateCode("INV")),
           inquiry: inquiry._id,
           customer: inquiry.customer,
           customerSnapshot,
           items: invoiceItems,
+          productSubtotal,
+          vatRate: normalizedVatRate,
+          vatAmount,
+          discountRate: normalizedDiscountRate,
+          discountAmount,
+          shippingCost: normalizedShippingCost,
           subtotal,
           total,
           paidAmount: normalizedPaidAmount,
@@ -586,6 +732,9 @@ const createInvoiceFromInquiry = async (req, res) => {
           paymentStatus: summarizePaymentStatus(total, normalizedPaidAmount),
           currency: String(currency || inquiry.currency || "USD").trim(),
           notes: String(notes || "").trim(),
+          extraNotes: String(extraNotes || "").trim(),
+          termsAndConditions: String(termsAndConditions || "").trim(),
+          additionalMessages: String(additionalMessages || "").trim(),
           createdBy: {
             id: String(req.authUser._id),
             name: req.authUser.fullName || "",
@@ -715,6 +864,7 @@ module.exports = {
   getMyInquiries,
   getAllInquiries,
   updateInquiryStatus,
+  deleteInquiry,
   createInvoiceFromInquiry,
   getMyInvoices,
   getAllInvoices,

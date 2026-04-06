@@ -15,7 +15,7 @@ const router = express.Router();
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GET /api/categories - List all categories with pagination
-router.get("/", authenticate, requireStaff, listCategories);
+router.get("/",  listCategories);
 
 // GET /api/categories/:categoryId - Get a single category
 router.get("/:categoryId", authenticate, requireStaff, getCategory);

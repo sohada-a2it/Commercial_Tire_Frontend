@@ -74,11 +74,7 @@ const invoiceSchema = new mongoose.Schema(
       state: { type: String, trim: true },
       zipCode: { type: String, trim: true },
       notes: { type: String, trim: true },
-      paymentMethod: {
-        type: String,
-        enum: ["credit-card", "bank"],
-        default: "bank",
-      },
+      paymentMethod: { type: String, trim: true, default: "bank" },
     },
     items: {
       type: [invoiceItemSchema],
@@ -90,6 +86,36 @@ const invoiceSchema = new mongoose.Schema(
     subtotal: {
       type: Number,
       required: true,
+      min: 0,
+    },
+    productSubtotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    vatRate: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    vatAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    discountRate: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    shippingCost: {
+      type: Number,
+      default: 0,
       min: 0,
     },
     total: {
@@ -109,7 +135,7 @@ const invoiceSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["unpaid", "partial", "paid"],
+      enum: ["due", "unpaid", "partial", "full"],
       default: "unpaid",
       index: true,
     },
@@ -124,6 +150,18 @@ const invoiceSchema = new mongoose.Schema(
       default: "issued",
     },
     notes: {
+      type: String,
+      trim: true,
+    },
+    extraNotes: {
+      type: String,
+      trim: true,
+    },
+    termsAndConditions: {
+      type: String,
+      trim: true,
+    },
+    additionalMessages: {
       type: String,
       trim: true,
     },

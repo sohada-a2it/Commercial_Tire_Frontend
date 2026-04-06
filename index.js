@@ -7,6 +7,7 @@ const seedDefaultAdmin = require("./config/seedDefaultAdmin");
 const userRoutes = require("./routes/userRoutes");
 const orderFlowRoutes = require("./routes/orderFlowRoutes");
 const catalogRoutes = require("./routes/catalogRoutes");
+const categoryRoutes = require("./routes/categoryRoutes");
 
 const app = express();
 
@@ -42,6 +43,7 @@ app.use(express.json());
 app.use("/api/users", userRoutes);
 app.use("/api", orderFlowRoutes);
 app.use("/api/catalog", catalogRoutes);
+app.use("/api/categories", categoryRoutes);
 
 // Email endpoint
 app.post("/api/send-email", async (req, res) => {

@@ -206,6 +206,61 @@ const normalizeProductPayload = (payload = {}) => {
   };
 };
 
+const normalizeSubcategories = (subcategories) => {
+  // Handle null, undefined, or non-array values
+  if (!subcategories) {
+    return [];
+  }
+
+  // If it's a string (possibly JSON), try to parse it
+  if (typeof subcategories === "string") {
+    try {
+      subcategories = JSON.parse(subcategories);
+    } catch {
+      return [];
+    }
+  }
+
+  // Ensure it's an array
+  if (!Array.isArray(subcategories)) {
+    return [];
+  }
+
+  // Normalize each subcategory and filter out invalid ones
+  return subcategories
+    .map((subcategory, index) => {
+      if (!subcategory || typeof subcategory !== "object") {
+        return null;
+      }
+
+      // Extract name from various possible formats
+      const name = String(subcategory.name || subcategory.title || "").trim();
+      
+      // Skip subcategories without a valid name
+      if (!name) {
+        return null;
+      }
+
+      return {
+        id: normalizeNumber(subcategory.id ?? subcategory._id ?? index + 1),
+        name,
+        slug: String(subcategory.slug || slugifyText(name)).trim(),
+        description: String(subcategory.description || "").trim(),
+        displayOrder: normalizeNumber(subcategory.displayOrder ?? index),
+        isActive: subcategory.isActive === undefined ? true : Boolean(subcategory.isActive),
+        image: {
+          url: String(
+            typeof subcategory.image === "string"
+              ? subcategory.image
+              : subcategory.image?.url || ""
+          ).trim(),
+          publicId: String(subcategory.image?.publicId || "").trim(),
+        },
+      };
+    })
+    .filter((subcategory) => subcategory !== null);
+};
+
 const normalizeCategoryPayload = (payload = {}) => ({
   sourceId: normalizeSourceId(payload.sourceId ?? payload.id),
   name: String(payload.name || "").trim(),
@@ -222,26 +277,7 @@ const normalizeCategoryPayload = (payload = {}) => ({
     ).trim(),
     publicId: String(payload.image?.publicId || payload.heroImagePublicId || "").trim(),
   },
-  subcategories: Array.isArray(payload.subcategories)
-    ? payload.subcategories
-        .map((subcategory, index) => ({
-          id: normalizeNumber(subcategory?.id ?? index + 1),
-          name: String(subcategory?.name || "").trim(),
-          slug: String(subcategory?.slug || slugifyText(subcategory?.name)).trim(),
-          description: String(subcategory?.description || "").trim(),
-          displayOrder: normalizeNumber(subcategory?.displayOrder ?? index),
-          isActive: subcategory?.isActive === undefined ? true : Boolean(subcategory?.isActive),
-          image: {
-            url: String(
-              typeof subcategory?.image === "string"
-                ? subcategory.image
-                : subcategory?.image?.url || ""
-            ).trim(),
-            publicId: String(subcategory?.image?.publicId || "").trim(),
-          },
-        }))
-        .filter((subcategory) => subcategory.name)
-    : [],
+  subcategories: normalizeSubcategories(payload.subcategories),
   metadata: payload.metadata || {},
 });
 
@@ -517,6 +553,11 @@ const listCategories = async (req, res) => {
 const createCategory = async (req, res) => {
   try {
     const payload = normalizeCategoryPayload(req.body);
+    
+    // Debug logging for subcategory issues
+    console.log("Create category - Raw subcategories:", JSON.stringify(req.body.subcategories));
+    console.log("Create category - Normalized subcategories:", JSON.stringify(payload.subcategories));
+    
     if (!payload.name) {
       return res.status(400).json({ success: false, message: "Category name is required" });
     }
@@ -529,6 +570,7 @@ const createCategory = async (req, res) => {
     const category = await Category.create(payload);
     res.status(201).json({ success: true, category: mapCategory(category) });
   } catch (error) {
+    console.error("Create category error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -537,6 +579,10 @@ const updateCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
     const payload = normalizeCategoryPayload(req.body);
+
+    // Debug logging for subcategory issues
+    console.log("Update category - Raw subcategories:", JSON.stringify(req.body.subcategories));
+    console.log("Update category - Normalized subcategories:", JSON.stringify(payload.subcategories));
 
     const category = await Category.findById(categoryId);
     if (!category) {
@@ -550,12 +596,18 @@ const updateCategory = async (req, res) => {
     category.displayOrder = payload.displayOrder;
     category.isActive = payload.isActive;
     category.image = payload.image;
-    category.subcategories = payload.subcategories;
+    
+    // Only update subcategories if provided in request
+    if (req.body.subcategories !== undefined) {
+      category.subcategories = payload.subcategories;
+    }
+    
     category.metadata = payload.metadata;
 
     await category.save();
     res.json({ success: true, category: mapCategory(category) });
   } catch (error) {
+    console.error("Update category error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -986,6 +1038,7 @@ module.exports = {
   deleteMedia,
   importCatalogFromJson,
   normalizeCategoryPayload,
+  normalizeSubcategories,
   normalizeProductPayload,
   mapCategory,
   mapProduct,

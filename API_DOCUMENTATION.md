@@ -310,3 +310,7 @@ curl -X DELETE "http://localhost:5000/api/users/authorized-persons/67f0abc1234de
 - Authorized-person CRUD is DB-only and independent from customer CRUD.
 - Firebase is still used in customer auth flow and token-based route protection.
 
+
+
+## 12) category :
+get all category:/api/categories 

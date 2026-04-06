@@ -286,20 +286,35 @@ const generateInvoicePdfBuffer = (invoice) =>
     doc.strokeColor("#111827");
 
     const drawCell = (x, y, w, h, label, value, options = {}) => {
+      const {
+        bg,
+        align = "left",
+        labelSize = 9,
+        valueSize = 9.5,
+        multiline = false,
+      } = options;
+
       doc.rect(x, y, w, h).stroke();
-      if (options.bg) {
+      if (bg) {
         doc.save();
-        doc.rect(x, y, w, h).fill(options.bg);
+        doc.rect(x, y, w, h).fill(bg);
         doc.restore();
         doc.rect(x, y, w, h).stroke();
       }
       if (label) {
-        doc.font("Helvetica-Bold").fontSize(9).text(label, x + 6, y + 5, { width: w - 12 });
+        doc.font("Helvetica-Bold").fontSize(labelSize).text(label, x + 6, y + 5, {
+          width: w - 12,
+          align,
+          lineBreak: true,
+        });
       }
       if (value !== undefined && value !== null) {
-        doc.font("Helvetica").fontSize(9).text(String(value), x + 6, y + (label ? 18 : 6), {
+        doc.font("Helvetica").fontSize(valueSize).text(String(value), x + 6, y + (label ? 18 : 8), {
           width: w - 12,
           height: h - (label ? 20 : 8),
+          align,
+          lineBreak: multiline,
+          ellipsis: multiline ? false : true,
         });
       }
     };
@@ -308,14 +323,14 @@ const generateInvoicePdfBuffer = (invoice) =>
     doc.rect(tableX, y, tableWidth, pageHeight - margin * 2).stroke();
 
     drawCell(tableX, y, tableWidth, 44, "", "");
-    doc.font("Helvetica-Bold").fontSize(26).text("ASIAN IMPORT EXPORT CO., LTD", tableX, y + 10, {
+    doc.font("Helvetica-Bold").fontSize(18).text("ASIAN IMPORT EXPORT CO., LTD", tableX, y + 8, {
       width: tableWidth,
       align: "center",
     });
     y += 44;
 
     drawCell(tableX, y, tableWidth, 32, "", "");
-    doc.font("Helvetica-Bold").fontSize(15).text("Proforma Invoice", tableX, y + 7, {
+    doc.font("Helvetica-Bold").fontSize(12).text("Proforma Invoice", tableX, y + 8, {
       width: tableWidth,
       align: "center",
     });
@@ -330,7 +345,7 @@ const generateInvoicePdfBuffer = (invoice) =>
     const x3 = x2 + c2;
     const x4 = x3 + c3;
 
-    const rowHeight = 28;
+    const rowHeight = 30;
     drawCell(x1, y, c1, rowHeight, "", "SC No:");
     drawCell(x2, y, c2, rowHeight, "", invoice.invoiceNumber || "");
     drawCell(x3, y, c3, rowHeight, "", "Issue Date:");
@@ -352,9 +367,9 @@ const generateInvoicePdfBuffer = (invoice) =>
       const lx = tableX;
       const rx = tableX + half;
       drawCell(lx, y, half * 0.3, height, "", leftLabel);
-      drawCell(lx + half * 0.3, y, half * 0.7, height, "", leftValue || "");
+      drawCell(lx + half * 0.3, y, half * 0.7, height, "", leftValue || "", { multiline: height >= 40, valueSize: 9 });
       drawCell(rx, y, half * 0.3, height, "", rightLabel);
-      drawCell(rx + half * 0.3, y, half * 0.7, height, "", rightValue || "");
+      drawCell(rx + half * 0.3, y, half * 0.7, height, "", rightValue || "", { multiline: height >= 40, valueSize: 9 });
       y += height;
     };
 
@@ -364,14 +379,14 @@ const generateInvoicePdfBuffer = (invoice) =>
     drawDualRow("Mobile:", customer.whatsappNumber || customer.phone || "", "Mobile:", COMPANY_INFO.mobile);
     drawDualRow("Address:", customerAddress, "Address:", COMPANY_INFO.address, 44);
 
-    drawCell(tableX, y, tableWidth * 0.3, 30, "", "Payment Terms:", { bg: "#edf2e5" });
-    drawCell(tableX + tableWidth * 0.3, y, tableWidth * 0.7, 30, "", paymentTerms, { bg: "#edf2e5" });
+    drawCell(tableX, y, tableWidth * 0.3, 30, "", "Payment Terms:", { bg: "#edf2e5", valueSize: 9 });
+    drawCell(tableX + tableWidth * 0.3, y, tableWidth * 0.7, 30, "", paymentTerms, { bg: "#edf2e5", valueSize: 9 });
     y += 30;
 
     drawDualRow("Production Time:", productionTime, "", "", 28);
     drawDualRow("Port of Loading:", portOfLoading, "Delivery Address:", deliveryAddress, 34);
 
-    drawCell(tableX, y, tableWidth, 30, "", "Product Description:");
+    drawCell(tableX, y, tableWidth, 30, "", "");
     doc.font("Helvetica-Bold").fontSize(11).text("Product Description:", tableX, y + 8, {
       width: tableWidth,
       align: "center",
@@ -385,7 +400,7 @@ const generateInvoicePdfBuffer = (invoice) =>
       return acc;
     }, []);
 
-    const headerHeight = 34;
+    const headerHeight = 30;
     const headers = ["Product Name", "Brand", "Pattern", "Ply", "QTY", "Unit Price\n(USD/Pics)", "Total Price (USD)"];
     headers.forEach((header, index) => drawCell(pXs[index], y, pWidths[index], headerHeight, "", header));
     y += headerHeight;
@@ -403,8 +418,8 @@ const generateInvoicePdfBuffer = (invoice) =>
         toPdfCurrency(item.unitPrice),
         toPdfCurrency(item.lineTotal),
       ];
-      row.forEach((cell, index) => drawCell(pXs[index], y, pWidths[index], 26, "", cell));
-      y += 26;
+      row.forEach((cell, index) => drawCell(pXs[index], y, pWidths[index], 28, "", cell, { valueSize: 9.5 }));
+      y += 28;
     });
 
     if (items.length > visibleItems.length) {
@@ -412,12 +427,22 @@ const generateInvoicePdfBuffer = (invoice) =>
       y += 24;
     }
 
-    const summaryHeight = 66;
+    const summaryHeight = 74;
     const leftWidth = tableWidth * 0.58;
     const rightWidth = tableWidth - leftWidth;
-    drawCell(tableX, y, leftWidth, summaryHeight, "", `Bank Details: ${bankDetails}`);
-    drawCell(tableX + leftWidth, y, rightWidth * 0.5, summaryHeight, "", `Total (${Number(invoice.discountRate || 0).toFixed(1)}%\nDiscount Added):`);
-    drawCell(tableX + leftWidth + rightWidth * 0.5, y, rightWidth * 0.5, summaryHeight, "", toPdfCurrency(invoice.total));
+    drawCell(tableX, y, leftWidth, summaryHeight, "", `Bank Details: ${bankDetails}`, { multiline: true, valueSize: 9 });
+    drawCell(
+      tableX + leftWidth,
+      y,
+      rightWidth * 0.5,
+      summaryHeight,
+      "",
+      `Total (${Number(invoice.discountRate || 0).toFixed(1)}%\nDiscount Added):`,
+      { multiline: true, valueSize: 9.5 }
+    );
+    drawCell(tableX + leftWidth + rightWidth * 0.5, y, rightWidth * 0.5, summaryHeight, "", toPdfCurrency(invoice.total), {
+      valueSize: 12,
+    });
     y += summaryHeight;
 
     const bottomHeight = Math.max(pageHeight - margin - y, 60);

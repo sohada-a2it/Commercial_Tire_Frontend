@@ -452,13 +452,14 @@ const generateInvoicePdfBuffer = (invoice) =>
       y,
       rightWidth * 0.5,
       summaryHeight,
-      "",
-      `Total (${Number(invoice.discountRate || 0).toFixed(1)}%\nDiscount Added):`,
+      "Total",`(${Number(invoice.discountRate || 0).toFixed(0)}% discount added):`,
       {
         multiline: true,
-        valueSize: 12,
+        labelSize: 11,
+        valueSize: 11,
         valueFont: "Helvetica-Bold",
         valueColor: "#f97316",
+        labelColor: "#111827",
         bg: "#dbeafe",
         borders: { top: true, right: true, bottom: true, left: false },
       }

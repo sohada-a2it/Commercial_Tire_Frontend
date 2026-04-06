@@ -8,6 +8,7 @@ const {
   createInvoiceFromInquiry,
   getMyInvoices,
   getAllInvoices,
+  deleteInvoice,
   downloadInvoicePdf,
 } = require("../controllers/orderFlowController");
 const { authenticate, requireAdmin, requireStaff } = require("../middleware/auth");
@@ -23,6 +24,7 @@ router.delete("/inquiries/:inquiryId", authenticate, requireAdmin, deleteInquiry
 router.post("/invoices", authenticate, requireAdmin, createInvoiceFromInquiry);
 router.get("/invoices/my", authenticate, getMyInvoices);
 router.get("/invoices", authenticate, requireStaff, getAllInvoices);
+router.delete("/invoices/:invoiceId", authenticate, requireAdmin, deleteInvoice);
 router.get("/invoices/:invoiceId/pdf", authenticate, downloadInvoicePdf);
 
 module.exports = router;

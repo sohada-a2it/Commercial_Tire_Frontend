@@ -859,6 +859,55 @@ const getAllInvoices = async (req, res) => {
   }
 };
 
+const deleteInvoice = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    if (req.authUser?.role !== "admin") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({ success: false, message: "Admin access required" });
+    }
+
+    const { invoiceId } = req.params;
+    if (!invoiceId || !mongoose.Types.ObjectId.isValid(invoiceId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ success: false, message: "Valid invoiceId is required" });
+    }
+
+    const invoice = await Invoice.findById(invoiceId).session(session);
+    if (!invoice) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ success: false, message: "Invoice not found" });
+    }
+
+    const inquiry = await Inquiry.findById(invoice.inquiry).session(session);
+    if (inquiry) {
+      inquiry.linkedInvoice = null;
+      inquiry.status = "in_process";
+      inquiry.payment.confirmed = false;
+      inquiry.payment.paidAmount = 0;
+      inquiry.payment.confirmedAt = null;
+      await inquiry.save({ session });
+    }
+
+    await Invoice.deleteOne({ _id: invoice._id }).session(session);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({ success: true, message: "Invoice deleted successfully" });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Delete invoice error:", error);
+    return res.status(500).json({ success: false, message: "Failed to delete invoice" });
+  }
+};
+
 module.exports = {
   placeOrderInquiry,
   getMyInquiries,
@@ -868,5 +917,6 @@ module.exports = {
   createInvoiceFromInquiry,
   getMyInvoices,
   getAllInvoices,
+  deleteInvoice,
   downloadInvoicePdf,
 };

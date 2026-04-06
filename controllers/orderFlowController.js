@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 const nodemailer = require("nodemailer");
 const PDFDocument = require("pdfkit");
+const fs = require("fs");
+const path = require("path");
 const Inquiry = require("../models/Inquiry");
 const Invoice = require("../models/Invoice");
 const User = require("../models/User");
@@ -63,6 +65,7 @@ const toLineItem = (item = {}) => {
     productId: item.productId ? String(item.productId) : item.id ? String(item.id) : "",
     name: sanitizeText(String(item.name || "")),
     title: sanitizeText(String(item.title || item.name || "")),
+    ply: sanitizeText(String(item.ply || "")),
     image: item.image ? String(item.image) : "",
     quantity,
     unitPrice,
@@ -205,121 +208,211 @@ const createTransporter = () => {
 
 const toPdfCurrency = (value) => `$${Number(value || 0).toFixed(2)}`;
 
+const COMPANY_INFO = {
+  name: "ASIAN IMPORT AND EXPORT CO Ltd",
+  contact: "+14379003996",
+  email: "info@asianimportexport.com",
+  mobile: "+6621055786",
+  address:
+    "63/16 Soi Chumchon Talat Tha Ruea Khlong Toei Khwaeng Khlong Toei, Khet Khlong Toei Krung Thep Maha Nakhon 10110, Thailand",
+};
+
+const getLineValue = (text, label) => {
+  if (!text) return "";
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = String(text).match(new RegExp(`(?:^|\\n)${escaped}:\\s*(.+)`, "i"));
+  return match?.[1]?.trim() || "";
+};
+
+const toDateLabel = (value, fallbackDate = new Date()) => {
+  if (!value) return fallbackDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+};
+
+const getLogoPath = () => {
+  const candidates = [
+    path.resolve(__dirname, "../../Asian.Import.Export.Co.Frontend/public/logo.webp"),
+    path.resolve(__dirname, "../public/logo.webp"),
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || "";
+};
+
 const generateInvoicePdfBuffer = (invoice) =>
   new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 50 });
+    const doc = new PDFDocument({ size: "A4", margin: 24 });
     const chunks = [];
 
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    const y0 = 50;
-    doc.fontSize(20).text("Invoice", 50, y0);
-    doc
-      .fontSize(11)
-      .text(`Invoice Number: ${invoice.invoiceNumber}`, 50, y0 + 30)
-      .text(`Inquiry ID: ${invoice.inquiry}`, 50, y0 + 48)
-      .text(`Issued: ${new Date(invoice.issuedAt || invoice.createdAt).toLocaleString()}`, 50, y0 + 66);
+    const pageWidth = doc.page.width;
+    const pageHeight = doc.page.height;
+    const margin = 24;
+    const tableX = margin;
+    const tableWidth = pageWidth - margin * 2;
+    const issueDate = getLineValue(invoice.notes, "Issue Date") || invoice.issuedAt || invoice.createdAt;
+    const validityDate = getLineValue(invoice.notes, "Validity Date") || new Date(Date.now() + 4 * 86400000);
+    const paymentTerms = getLineValue(invoice.notes, "Payment Terms");
+    const productionTime = getLineValue(invoice.notes, "Production Time");
+    const portOfLoading = getLineValue(invoice.notes, "Port Of Loading");
+    const deliveryAddress = getLineValue(invoice.notes, "Delivery Address");
+    const incoterms = getLineValue(invoice.additionalMessages, "Incoterms") || "";
+    const bankDetails = getLineValue(invoice.termsAndConditions, "Bank Details") || "";
 
-    doc
-      .fontSize(11)
-      .text("Customer", 50, y0 + 100)
-      .text(invoice.customerSnapshot.name || "", 50, y0 + 118)
-      .text(invoice.customerSnapshot.email || "", 50, y0 + 136)
-      .text(invoice.customerSnapshot.phone || "", 50, y0 + 154)
-      .text(invoice.customerSnapshot.address || "", 50, y0 + 172)
-      .text(
-        `${invoice.customerSnapshot.city || ""}, ${invoice.customerSnapshot.state || ""} ${invoice.customerSnapshot.zipCode || ""}`,
-        50,
-        y0 + 190
-      )
-      .text(
-        `Payment Method: ${paymentMethodLabel(invoice.customerSnapshot.paymentMethod || "bank")}`,
-        50,
-        y0 + 208
-      );
-
-    let currentY = y0 + 245;
-    doc.fontSize(11).text("Items", 50, currentY);
-    currentY += 20;
-
-    doc
-      .fontSize(10)
-      .text("Name", 50, currentY)
-      .text("Qty", 290, currentY)
-      .text("Unit", 340, currentY)
-      .text("Discount", 410, currentY)
-      .text("Total", 490, currentY);
-
-    currentY += 16;
-
-    (invoice.items || []).forEach((item) => {
-      const name = sanitizeText(item.title || item.name || "", "Item");
-      doc
-        .fontSize(10)
-        .text(name, 50, currentY, { width: 230 })
-        .text(String(item.quantity || 0), 290, currentY)
-        .text(toPdfCurrency(item.unitPrice), 340, currentY)
-        .text(toPdfCurrency(item.discount), 410, currentY)
-        .text(toPdfCurrency(item.lineTotal), 490, currentY);
-      currentY += 20;
-
-      if (currentY > 720) {
-        doc.addPage();
-        currentY = 60;
+    const logoPath = getLogoPath();
+    if (logoPath) {
+      try {
+        doc.save();
+        doc.fillOpacity(0.08);
+        doc.image(logoPath, pageWidth / 2 - 155, pageHeight / 2 - 155, { width: 310 });
+        doc.restore();
+      } catch (logoError) {
+        // Some PDFKit builds cannot decode webp; skip watermark instead of failing invoice download.
       }
+    }
+
+    const drawCell = (x, y, w, h, label, value, options = {}) => {
+      doc.rect(x, y, w, h).stroke();
+      if (options.bg) {
+        doc.save();
+        doc.rect(x, y, w, h).fill(options.bg);
+        doc.restore();
+        doc.rect(x, y, w, h).stroke();
+      }
+      if (label) {
+        doc.font("Helvetica-Bold").fontSize(9).text(label, x + 6, y + 5, { width: w - 12 });
+      }
+      if (value !== undefined && value !== null) {
+        doc.font("Helvetica").fontSize(9).text(String(value), x + 6, y + (label ? 18 : 6), {
+          width: w - 12,
+          height: h - (label ? 20 : 8),
+        });
+      }
+    };
+
+    let y = margin;
+    doc.rect(tableX, y, tableWidth, pageHeight - margin * 2).stroke();
+
+    drawCell(tableX, y, tableWidth, 44, "", "");
+    doc.font("Helvetica-Bold").fontSize(26).text("ASIAN IMPORT EXPORT CO., LTD", tableX, y + 10, {
+      width: tableWidth,
+      align: "center",
+    });
+    y += 44;
+
+    drawCell(tableX, y, tableWidth, 32, "", "");
+    doc.font("Helvetica-Bold").fontSize(15).text("Proforma Invoice", tableX, y + 7, {
+      width: tableWidth,
+      align: "center",
+    });
+    y += 32;
+
+    const c1 = tableWidth * 0.15;
+    const c2 = tableWidth * 0.18;
+    const c3 = tableWidth * 0.2;
+    const c4 = tableWidth - c1 - c2 - c3;
+    const x1 = tableX;
+    const x2 = x1 + c1;
+    const x3 = x2 + c2;
+    const x4 = x3 + c3;
+
+    const rowHeight = 28;
+    drawCell(x1, y, c1, rowHeight, "", "SC No:");
+    drawCell(x2, y, c2, rowHeight, "", invoice.invoiceNumber || "");
+    drawCell(x3, y, c3, rowHeight, "", "Issue Date:");
+    drawCell(x4, y, c4, rowHeight, "", toDateLabel(issueDate));
+    y += rowHeight;
+
+    drawCell(x1, y, c1, rowHeight, "", "");
+    drawCell(x2, y, c2, rowHeight, "", "");
+    drawCell(x3, y, c3, rowHeight, "", "Validity of contract:");
+    drawCell(x4, y, c4, rowHeight, "", toDateLabel(validityDate));
+    y += rowHeight;
+
+    const customer = invoice.customerSnapshot || {};
+    const customerName = customer.companyName || customer.name || "";
+    const customerAddress = [customer.address, customer.city, customer.state, customer.zipCode].filter(Boolean).join(", ");
+
+    const drawDualRow = (leftLabel, leftValue, rightLabel, rightValue, height = 30) => {
+      const half = tableWidth / 2;
+      const lx = tableX;
+      const rx = tableX + half;
+      drawCell(lx, y, half * 0.3, height, "", leftLabel);
+      drawCell(lx + half * 0.3, y, half * 0.7, height, "", leftValue || "");
+      drawCell(rx, y, half * 0.3, height, "", rightLabel);
+      drawCell(rx + half * 0.3, y, half * 0.7, height, "", rightValue || "");
+      y += height;
+    };
+
+    drawDualRow("To:", customerName, "From:", COMPANY_INFO.name);
+    drawDualRow("Contact:", customer.phone || "", "Contact:", COMPANY_INFO.contact);
+    drawDualRow("Email:", customer.email || "", "Email:", COMPANY_INFO.email);
+    drawDualRow("Mobile:", customer.whatsappNumber || customer.phone || "", "Mobile:", COMPANY_INFO.mobile);
+    drawDualRow("Address:", customerAddress, "Address:", COMPANY_INFO.address, 44);
+
+    drawCell(tableX, y, tableWidth * 0.3, 30, "", "Payment Terms:", { bg: "#edf2e5" });
+    drawCell(tableX + tableWidth * 0.3, y, tableWidth * 0.7, 30, "", paymentTerms, { bg: "#edf2e5" });
+    y += 30;
+
+    drawDualRow("Production Time:", productionTime, "", "", 28);
+    drawDualRow("Port of Loading:", portOfLoading, "Delivery Address:", deliveryAddress, 34);
+
+    drawCell(tableX, y, tableWidth, 30, "", "Product Description:");
+    doc.font("Helvetica-Bold").fontSize(11).text("Product Description:", tableX, y + 8, {
+      width: tableWidth,
+      align: "center",
+    });
+    y += 30;
+
+    const pCols = [0.16, 0.14, 0.1, 0.07, 0.08, 0.15, 0.2];
+    const pWidths = pCols.map((ratio) => ratio * tableWidth);
+    const pXs = pWidths.reduce((acc, w, i) => {
+      acc.push((acc[i - 1] || tableX) + (i === 0 ? 0 : pWidths[i - 1]));
+      return acc;
+    }, []);
+
+    const headerHeight = 34;
+    const headers = ["Product Name", "Brand", "Pattern", "Ply", "QTY", "Unit Price\n(USD/Pics)", "Total Price (USD)"];
+    headers.forEach((header, index) => drawCell(pXs[index], y, pWidths[index], headerHeight, "", header));
+    y += headerHeight;
+
+    const items = Array.isArray(invoice.items) ? invoice.items : [];
+    const maxRows = 7;
+    const visibleItems = items.slice(0, maxRows);
+    visibleItems.forEach((item) => {
+      const row = [
+        sanitizeText(item.title || item.name || "-"),
+        "-",
+        "-",
+        sanitizeText(String(item.ply || "-"), "-"),
+        String(item.quantity || 0),
+        toPdfCurrency(item.unitPrice),
+        toPdfCurrency(item.lineTotal),
+      ];
+      row.forEach((cell, index) => drawCell(pXs[index], y, pWidths[index], 26, "", cell));
+      y += 26;
     });
 
-    currentY += 12;
-    doc.fontSize(11).text("Payment Breakdown", 50, currentY);
-    currentY += 18;
-
-    const breakdownRows = [
-      ["Product subtotal", invoice.productSubtotal],
-      ["VAT", invoice.vatAmount],
-      ["Discount", invoice.discountAmount ? -Math.abs(invoice.discountAmount) : 0],
-      ["Shipping", invoice.shippingCost],
-    ];
-
-    breakdownRows.forEach(([label, amount]) => {
-      doc.fontSize(10).text(`${label}: ${toPdfCurrency(amount)}`, 50, currentY);
-      currentY += 16;
-    });
-
-    doc
-      .fontSize(11)
-      .text(`Subtotal: ${toPdfCurrency(invoice.subtotal)}`, 370, currentY - 64)
-      .text(`Total: ${toPdfCurrency(invoice.total)}`, 370, currentY - 46)
-      .text(`Paid: ${toPdfCurrency(invoice.paidAmount)}`, 370, currentY - 28)
-      .text(`Balance Due: ${toPdfCurrency(invoice.balanceDue)}`, 370, currentY - 10)
-      .text(`Payment Status: ${paymentStatusLabel(invoice.paymentStatus)}`, 370, currentY + 8);
-
-    const notesStartY = Math.max(currentY + 32, 640);
-
-    if (invoice.notes) {
-      doc.fontSize(11).text("Notes", 50, notesStartY).fontSize(10).text(invoice.notes, 50, notesStartY + 18, {
-        width: 290,
-      });
+    if (items.length > visibleItems.length) {
+      drawCell(tableX, y, tableWidth, 24, "", `+ ${items.length - visibleItems.length} more item(s) included`);
+      y += 24;
     }
 
-    if (invoice.extraNotes) {
-      doc.fontSize(11).text("Extra Notes", 50, notesStartY + 90).fontSize(10).text(invoice.extraNotes, 50, notesStartY + 108, {
-        width: 290,
-      });
-    }
+    const summaryHeight = 66;
+    const leftWidth = tableWidth * 0.58;
+    const rightWidth = tableWidth - leftWidth;
+    drawCell(tableX, y, leftWidth, summaryHeight, "", `Bank Details: ${bankDetails}`);
+    drawCell(tableX + leftWidth, y, rightWidth * 0.5, summaryHeight, "", `Total (${Number(invoice.discountRate || 0).toFixed(1)}%\nDiscount Added):`);
+    drawCell(tableX + leftWidth + rightWidth * 0.5, y, rightWidth * 0.5, summaryHeight, "", toPdfCurrency(invoice.total));
+    y += summaryHeight;
 
-    if (invoice.termsAndConditions) {
-      doc.fontSize(11).text("Terms & Conditions", 50, notesStartY + 180).fontSize(10).text(invoice.termsAndConditions, 50, notesStartY + 198, {
-        width: 290,
-      });
-    }
-
-    if (invoice.additionalMessages) {
-      doc.fontSize(11).text("Additional Messages", 50, notesStartY + 270).fontSize(10).text(invoice.additionalMessages, 50, notesStartY + 288, {
-        width: 290,
-      });
-    }
+    const bottomHeight = Math.max(pageHeight - margin - y, 60);
+    drawCell(tableX, y, tableWidth - 140, bottomHeight, "", "");
+    drawCell(tableX + tableWidth - 140, y, 140, bottomHeight, "", `Incoterms: ${incoterms || "N/A"}`);
 
     doc.end();
   });

@@ -15,6 +15,11 @@ const invoiceItemSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    ply: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     image: {
       type: String,
       trim: true,

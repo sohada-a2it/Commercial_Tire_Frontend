@@ -25,6 +25,11 @@ const invoiceItemSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    size: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     ply: {
       type: String,
       trim: true,

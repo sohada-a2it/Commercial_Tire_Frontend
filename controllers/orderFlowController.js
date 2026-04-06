@@ -65,6 +65,8 @@ const toLineItem = (item = {}) => {
     productId: item.productId ? String(item.productId) : item.id ? String(item.id) : "",
     name: sanitizeText(String(item.name || "")),
     title: sanitizeText(String(item.title || item.name || "")),
+    brand: sanitizeText(String(item.brand || "")),
+    pattern: sanitizeText(String(item.pattern || "")),
     ply: sanitizeText(String(item.ply || "")),
     image: item.image ? String(item.image) : "",
     quantity,
@@ -394,8 +396,8 @@ const generateInvoicePdfBuffer = (invoice) =>
     visibleItems.forEach((item) => {
       const row = [
         sanitizeText(item.title || item.name || "-"),
-        "-",
-        "-",
+        sanitizeText(String(item.brand || "-"), "-"),
+        sanitizeText(String(item.pattern || "-"), "-"),
         sanitizeText(String(item.ply || "-"), "-"),
         String(item.quantity || 0),
         toPdfCurrency(item.unitPrice),

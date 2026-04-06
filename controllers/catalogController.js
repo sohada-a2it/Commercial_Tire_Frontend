@@ -554,10 +554,6 @@ const createCategory = async (req, res) => {
   try {
     const payload = normalizeCategoryPayload(req.body);
     
-    // Debug logging for subcategory issues
-    console.log("Create category - Raw subcategories:", JSON.stringify(req.body.subcategories));
-    console.log("Create category - Normalized subcategories:", JSON.stringify(payload.subcategories));
-    
     if (!payload.name) {
       return res.status(400).json({ success: false, message: "Category name is required" });
     }
@@ -579,10 +575,6 @@ const updateCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
     const payload = normalizeCategoryPayload(req.body);
-
-    // Debug logging for subcategory issues
-    console.log("Update category - Raw subcategories:", JSON.stringify(req.body.subcategories));
-    console.log("Update category - Normalized subcategories:", JSON.stringify(payload.subcategories));
 
     const category = await Category.findById(categoryId);
     if (!category) {
@@ -639,16 +631,36 @@ const listProducts = async (req, res) => {
     else if (sortBy === "brand-asc") sort = { brand: 1, name: 1 };
     else if (sortBy === "brand-desc") sort = { brand: -1, name: 1 };
 
-    const [products, total, categories, subcategories, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
+    const [products, total, allCategories, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
       Product.find(filter).sort(sort).skip(skip).limit(limit).populate("category"),
       Product.countDocuments(filter),
-      Product.distinct("categoryName", filter),
-      Product.distinct("subcategoryName", filter),
+      Category.find({ isActive: true }).select("name subcategories").lean(),
       Product.distinct("brand", filter),
       Product.distinct("keyAttributes.Brand", filter),
       Product.distinct("pattern", filter),
       Product.distinct("keyAttributes.Pattern", filter),
     ]);
+
+    // Build categoryMap: { categoryName: [subcategoryNames] }
+    const categoryMap = {};
+    allCategories.forEach((cat) => {
+      const catName = String(cat.name || "").trim();
+      if (catName) {
+        categoryMap[catName] = (cat.subcategories || [])
+          .map((sub) => String(sub.name || "").trim())
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
+      }
+    });
+
+    // Extract all category names sorted
+    const categories = Object.keys(categoryMap).sort((a, b) => a.localeCompare(b));
+
+    // Extract all subcategory names (flat list for backward compatibility)
+    const subcategories = Object.values(categoryMap)
+      .flat()
+      .filter((value, index, self) => self.indexOf(value) === index)
+      .sort((a, b) => a.localeCompare(b));
 
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const brands = Array.from(
@@ -679,8 +691,9 @@ const listProducts = async (req, res) => {
         hasPrevPage: page > 1,
       },
       filters: {
-        categories: (categories || []).map((value) => String(value || "").trim()).filter(Boolean).sort((a, b) => a.localeCompare(b)),
-        subcategories: (subcategories || []).map((value) => String(value || "").trim()).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+        categories,
+        subcategories,
+        categoryMap,
         brands,
         patterns,
       },

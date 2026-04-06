@@ -410,7 +410,7 @@ const generateInvoicePdfBuffer = (invoice) =>
     });
     y += 30;
 
-    const pCols = [0.14, 0.12, 0.1, 0.1, 0.07, 0.08, 0.14, 0.15];
+    const pCols = [0.16, 0.12, 0.1, 0.08, 0.1, 0.08, 0.16, 0.2];
     const pWidths = pCols.map((ratio) => ratio * tableWidth);
     const pXs = pWidths.reduce((acc, w, i) => {
       acc.push((acc[i - 1] || tableX) + (i === 0 ? 0 : pWidths[i - 1]));
@@ -418,7 +418,7 @@ const generateInvoicePdfBuffer = (invoice) =>
     }, []);
 
     const headerHeight = 30;
-    const headers = ["Product Name", "Brand", "Pattern", "Size", "Ply", "QTY", "Unit Price\n(USD/Pics)", "Total Price (USD)"];
+    const headers = ["Product Name", "Brand", "Pattern", "Ply", "Size", "QTY", "Unit Price\n(USD/Pics)", "Total Price (USD)"];
     headers.forEach((header, index) => drawCell(pXs[index], y, pWidths[index], headerHeight, "", header));
     y += headerHeight;
 
@@ -430,8 +430,8 @@ const generateInvoicePdfBuffer = (invoice) =>
         sanitizeText(item.title || item.name || "-"),
         sanitizeText(String(item.brand || "-"), "-"),
         sanitizeText(String(item.pattern || "-"), "-"),
-        sanitizeText(String(item.size || "-"), "-"),
         sanitizeText(String(item.ply || "-"), "-"),
+        sanitizeText(String(item.size || "-"), "-"),
         String(item.quantity || 0),
         toPdfCurrency(item.unitPrice),
         toPdfCurrency(item.lineTotal),
@@ -454,7 +454,8 @@ const generateInvoicePdfBuffer = (invoice) =>
       y,
       rightWidth * 0.5,
       summaryHeight,
-      "Total",`(${Number(invoice.discountRate || 0).toFixed(0)}% discount added):`,
+      "Final Amount:",
+      `(${Number(invoice.discountRate || 0).toFixed(0)}% discount added):`,
       {
         multiline: true,
         labelSize: 11,

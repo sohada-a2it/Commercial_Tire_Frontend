@@ -49,26 +49,10 @@ const createMailTransporter = () => {
 connectDB();
 seedDefaultAdmin();
 
-// Middleware
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  "http://localhost:3000",
-  "http://localhost:5000",
-  "http://127.0.0.1:3000",
-  "https://asianimportexport.com",
-  "https://www.asianimportexport.com",
-  "https://asian-expo-impo-backend-dashbaord.vercel.app",
-  "*"
-].filter(Boolean);
-
 app.use(
   cors({
-    origin(origin, callback) {
-      // Allow requests from non-browser clients (no Origin header)
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("Not allowed by CORS"));
-    },
+    // Reflect request origin and allow all origins.
+    origin: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,

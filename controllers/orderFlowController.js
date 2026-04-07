@@ -261,7 +261,7 @@ const getLogoPath = () => {
 
 const generateInvoicePdfBuffer = (invoice) =>
   new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 24 });
+    const doc = new PDFDocument({ size: "A4", margin: 42 });
     const chunks = [];
 
     doc.on("data", (chunk) => chunks.push(chunk));
@@ -270,7 +270,7 @@ const generateInvoicePdfBuffer = (invoice) =>
 
     const pageWidth = doc.page.width;
     const pageHeight = doc.page.height;
-    const margin = 24;
+    const margin = 42;
     const tableX = margin;
     const tableWidth = pageWidth - margin * 2;
     const issueDate = getLineValue(invoice.notes, "Issue Date") || invoice.issuedAt || invoice.createdAt;
@@ -459,38 +459,53 @@ const generateInvoicePdfBuffer = (invoice) =>
       y += 24;
     }
 
-    const summaryHeight = 74;
-    const leftWidth = tableWidth * 0.58;
-    const rightWidth = tableWidth - leftWidth;
-    drawCell(tableX, y, leftWidth, summaryHeight, "", `Bank Details: ${bankDetails}`, { multiline: true, valueSize: 9 });
-    drawCell(
-      tableX + leftWidth,
-      y,
-      rightWidth * 0.5,
-      summaryHeight,
-      "Final Amount:",
-      `(${Number(invoice.discountRate || 0).toFixed(0)}% discount added):`,
-      {
-        multiline: true,
+    const summaryHeight = 84;
+    const leftWidth = tableWidth * 0.52;
+    const middleWidth = tableWidth * 0.20;
+    const rightWidth = tableWidth - leftWidth - middleWidth;
+    drawCell(tableX, y, leftWidth, summaryHeight, "", "", {
+      bg: "#ffffff",
+    });
+    if (Number(invoice.discountRate || 0) > 0) {
+      drawCell(
+        tableX + leftWidth,
+        y,
+        middleWidth,
+        summaryHeight,
+        "Final Amount:",
+        `(${Number(invoice.discountRate || 0).toFixed(0)}% discount added)`,
+        {
+          labelSize: 11,
+          valueSize: 11,
+          valueFont: "Helvetica-Bold",
+          valueColor: "#f97316",
+          bg: "#dbeafe",
+        }
+      );
+    } else {
+      drawCell(tableX + leftWidth, y, middleWidth, summaryHeight, "Final Amount:", "", {
         labelSize: 11,
         valueSize: 11,
-        valueFont: "Helvetica-Bold",
-        valueColor: "#f97316",
-        labelColor: "#111827",
         bg: "#dbeafe",
-        borders: { top: true, right: true, bottom: true, left: false },
-      }
-    );
-    drawCell(tableX + leftWidth + rightWidth * 0.5, y, rightWidth * 0.5, summaryHeight, "", toPdfCurrency(invoice.total), {
-      valueSize: 14,
+      });
+    }
+    drawCell(tableX + leftWidth + middleWidth, y, rightWidth, summaryHeight, "", toPdfCurrency(invoice.total), {
+      valueSize: 18,
       valueFont: "Helvetica-Bold",
+      valueColor: "#111827",
       bg: "#dbeafe",
     });
     y += summaryHeight;
 
-    const bottomHeight = Math.max(pageHeight - margin - y, 60);
-    drawCell(tableX, y, tableWidth - 140, bottomHeight, "", "");
-    drawCell(tableX + tableWidth - 140, y, 140, bottomHeight, "", `Incoterms: ${incoterms || "N/A"}`, {
+    const bottomHeight = Math.max(pageHeight - margin - y, 72);
+    drawCell(tableX, y, tableWidth - 150, bottomHeight, "", bankDetails ? `Bank Details: ${bankDetails}` : "Bank Details: N/A", {
+      multiline: true,
+      labelSize: 11,
+      valueSize: 10,
+      valueFont: "Helvetica-Bold",
+      bg: "#ffffff",
+    });
+    drawCell(tableX + tableWidth - 150, y, 150, bottomHeight, "", `Incoterms: ${incoterms || "N/A"}`, {
       borders: { top: true, right: true, bottom: true, left: false },
     });
 

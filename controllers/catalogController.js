@@ -2,6 +2,9 @@ const fs = require("fs/promises");
 const path = require("path");
 const mongoose = require("mongoose");
 const multer = require("multer");
+const https = require("https");
+const http = require("http");
+const url = require("url");
 const Category = require("../models/Category");
 const Product = require("../models/Product");
 const MediaAsset = require("../models/MediaAsset");
@@ -501,6 +504,30 @@ const uploadBufferToCloudinary = (buffer, filename) =>
     stream.end(buffer);
   });
 
+const downloadUrlToBuffer = (urlString) =>
+  new Promise((resolve, reject) => {
+    try {
+      const parsedUrl = url.parse(urlString);
+      const protocol = parsedUrl.protocol === "https:" ? https : http;
+      const basename = path.basename(parsedUrl.pathname || "image.jpg");
+
+      protocol.get(urlString, { timeout: 10000 }, (response) => {
+        if (response.statusCode !== 200) {
+          return reject(new Error(`Failed to download URL: HTTP ${response.statusCode}`));
+        }
+
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => resolve({ buffer: Buffer.concat(chunks), filename: basename }));
+        response.on("error", reject);
+      }).on("timeout", () => {
+        reject(new Error("Download request timed out"));
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+
 const listCategories = async (req, res) => {
   try {
     const search = String(req.query.search || "").trim();
@@ -663,14 +690,82 @@ const listProducts = async (req, res) => {
     else if (sortBy === "brand-asc") sort = { brand: 1, name: 1 };
     else if (sortBy === "brand-desc") sort = { brand: -1, name: 1 };
 
+    // Build separate filters for each facet that exclude that specific filter
+    // This allows showing all available options even when a filter is selected
+    const buildFacetFilter = (excludeField) => {
+      const clauses = [];
+
+      if (req.query.search) {
+        const regex = { $regex: String(req.query.search), $options: "i" };
+        clauses.push({
+          $or: [
+            { name: regex },
+            { slug: regex },
+            { description: regex },
+            { mainCategory: regex },
+            { subCategory: regex },
+            { pattern: regex },
+            { "keyAttributes.Pattern": regex },
+            { brand: regex },
+            { "keyAttributes.Brand": regex },
+            { categoryName: regex },
+            { subcategoryName: regex },
+          ],
+        });
+      }
+
+      if (req.query.categoryId && excludeField !== "categoryId" && mongoose.Types.ObjectId.isValid(req.query.categoryId)) {
+        clauses.push({ category: req.query.categoryId });
+      }
+
+      if (req.query.category && excludeField !== "category") {
+        clauses.push({ categoryName: { $regex: String(req.query.category), $options: "i" } });
+      }
+
+      if (req.query.subcategoryId && excludeField !== "subcategoryId") {
+        clauses.push({ subcategoryId: normalizeNumber(req.query.subcategoryId) });
+      }
+
+      if (req.query.subcategory && excludeField !== "subcategory") {
+        clauses.push({ subcategoryName: { $regex: String(req.query.subcategory), $options: "i" } });
+      }
+
+      if (req.query.pattern && excludeField !== "pattern") {
+        const regex = { $regex: String(req.query.pattern), $options: "i" };
+        clauses.push({ $or: [{ pattern: regex }, { "keyAttributes.Pattern": regex }] });
+      }
+
+      if (req.query.brand && excludeField !== "brand") {
+        const regex = { $regex: String(req.query.brand), $options: "i" };
+        clauses.push({ $or: [{ brand: regex }, { "keyAttributes.Brand": regex }] });
+      }
+
+      if (req.query.isActive !== undefined) {
+        clauses.push({ isActive: req.query.isActive === "true" || req.query.isActive === true });
+      }
+
+      if (!clauses.length) return {};
+      if (clauses.length === 1) return clauses[0];
+      return { $and: clauses };
+    };
+
+    // Main filter for products
+    // Facet filters for each option (exclude the specific facet to show all available values)
+    const facetFilters = {
+      brand: buildFacetFilter("brand"),
+      category: buildFacetFilter("category"),
+      subcategory: buildFacetFilter("subcategoryId"),
+      pattern: buildFacetFilter("pattern"),
+    };
+
     const [products, total, allCategories, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
       Product.find(filter).sort(sort).skip(skip).limit(limit).populate("category"),
       Product.countDocuments(filter),
       Category.find({ isActive: true }).select("name subcategories").lean(),
-      Product.distinct("brand", filter),
-      Product.distinct("keyAttributes.Brand", filter),
-      Product.distinct("pattern", filter),
-      Product.distinct("keyAttributes.Pattern", filter),
+      Product.distinct("brand", facetFilters.brand),
+      Product.distinct("keyAttributes.Brand", facetFilters.brand),
+      Product.distinct("pattern", facetFilters.pattern),
+      Product.distinct("keyAttributes.Pattern", facetFilters.pattern),
     ]);
 
     // Build categoryMap: { categoryName: [subcategoryNames] }
@@ -881,6 +976,59 @@ const uploadMedia = async (req, res) => {
         email: String(req.authUser?.email || ""),
       },
       metadata,
+    });
+
+    res.status(201).json({ success: true, media });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const uploadMediaFromUrl = async (req, res) => {
+  try {
+    const imageUrl = String(req.body.url || "").trim();
+    if (!imageUrl) {
+      return res.status(400).json({ success: false, message: "Image URL is required" });
+    }
+
+    // Validate URL format
+    try {
+      new url.URL(imageUrl);
+    } catch (_error) {
+      return res.status(400).json({ success: false, message: "Invalid URL format" });
+    }
+
+    // Download URL to buffer
+    const { buffer, filename } = await downloadUrlToBuffer(imageUrl);
+
+    // Upload buffer to Cloudinary
+    const uploaded = await uploadBufferToCloudinary(buffer, filename);
+    const metadata = req.body.metadata ? JSON.parse(req.body.metadata) : {};
+
+    // Create media record
+    const media = await MediaAsset.create({
+      publicId: uploaded.public_id,
+      assetType: uploaded.resource_type || "image",
+      format: uploaded.format || "",
+      originalFilename: uploaded.originalFilename || filename,
+      url: uploaded.secure_url,
+      optimizedUrl: uploaded.optimizedUrl,
+      bytes: uploaded.bytes || 0,
+      width: uploaded.width || 0,
+      height: uploaded.height || 0,
+      folder: uploaded.folder || process.env.CLOUDINARY_CATALOG_FOLDER || "asian-import-export/catalog",
+      relatedType: req.body.relatedType || "",
+      relatedId: req.body.relatedId || "",
+      uploadedBy: {
+        id: String(req.authUser?._id || req.authUser?.id || ""),
+        name: String(req.authUser?.fullName || ""),
+        role: String(req.authUser?.role || ""),
+        email: String(req.authUser?.email || ""),
+      },
+      metadata: {
+        ...metadata,
+        sourceUrl: imageUrl,
+      },
     });
 
     res.status(201).json({ success: true, media });
@@ -1114,6 +1262,7 @@ module.exports = {
   deleteProduct,
   listMedia,
   uploadMedia,
+  uploadMediaFromUrl,
   deleteMedia,
   importCatalogFromJson,
   normalizeCategoryPayload,

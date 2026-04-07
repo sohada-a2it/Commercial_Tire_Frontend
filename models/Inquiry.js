@@ -122,6 +122,15 @@ const inquirySchema = new mongoose.Schema(
       ref: "Invoice",
       index: true,
     },
+    hiddenByCustomer: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    hiddenAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

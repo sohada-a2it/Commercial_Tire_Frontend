@@ -19,7 +19,7 @@ router.post("/inquiries/place-order", authenticate, placeOrderInquiry);
 router.get("/inquiries/my", authenticate, getMyInquiries);
 router.get("/inquiries", authenticate, requireStaff, getAllInquiries);
 router.patch("/inquiries/:inquiryId/status", authenticate, requireStaff, updateInquiryStatus);
-router.delete("/inquiries/:inquiryId", authenticate, requireAdmin, deleteInquiry);
+router.delete("/inquiries/:inquiryId", authenticate, deleteInquiry);
 
 router.post("/invoices", authenticate, requireAdmin, createInvoiceFromInquiry);
 router.get("/invoices/my", authenticate, getMyInvoices);

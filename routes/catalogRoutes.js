@@ -12,6 +12,7 @@ const {
   deleteProduct,
   listMedia,
   uploadMedia,
+  uploadMediaFromUrl,
   deleteMedia,
   importCatalogFromJson,
 } = require("../controllers/catalogController");
@@ -33,6 +34,7 @@ router.delete("/products/:productId", authenticate, requireAdmin, deleteProduct)
 
 router.get("/media", authenticate, requireStaff, listMedia);
 router.post("/media/upload", authenticate, requireStaff, uploadMiddleware, uploadMedia);
+router.post("/media/upload-from-url", authenticate, requireStaff, uploadMediaFromUrl);
 router.delete("/media/:publicId", authenticate, requireStaff, deleteMedia);
 
 module.exports = router;

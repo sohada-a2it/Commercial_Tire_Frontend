@@ -15,6 +15,7 @@ const ALLOWED_BUSINESS_TYPES = [
 const ALLOWED_AUTHORIZED_ROLES = ["admin", "moderator"];
 
 const normalizeRole = (role) => (role === "user" ? "customer" : role);
+const normalizeOptionalText = (value) => (value === undefined || value === null ? undefined : String(value).trim());
 
 const mapUserPayload = (user) => ({
   id: user._id,
@@ -186,6 +187,19 @@ const getUserProfile = async (req, res) => {
       });
     }
 
+    const requesterRole = normalizeRole(req.authUser?.role);
+    const requesterUid = String(req.authUser?.firebaseUid || "");
+    const targetUid = String(firebaseUid || "");
+    const isSelf = requesterUid && requesterUid === targetUid;
+    const isAdmin = requesterRole === "admin";
+
+    if (!isSelf && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only access your own profile",
+      });
+    }
+
     res.status(200).json({
       success: true,
       user: authorizedPerson
@@ -234,6 +248,19 @@ const updateUserProfile = async (req, res) => {
       });
     }
 
+    const requesterRole = normalizeRole(req.authUser?.role);
+    const requesterUid = String(req.authUser?.firebaseUid || "");
+    const targetUid = String(firebaseUid || "");
+    const isSelf = requesterUid && requesterUid === targetUid;
+    const isAdmin = requesterRole === "admin";
+
+    if (!isSelf && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only update your own profile",
+      });
+    }
+
     if (authorizedPerson) {
       // Authorized person settings updates (does not touch customer table)
       if (fullName !== undefined) authorizedPerson.fullName = fullName;
@@ -250,19 +277,27 @@ const updateUserProfile = async (req, res) => {
 
     if (user) {
       // Customer profile updates
-      if (companyName !== undefined) user.companyName = companyName;
-      if (fullName !== undefined) user.fullName = fullName;
-      if (whatsappNumber !== undefined) user.whatsappNumber = whatsappNumber;
-      if (country !== undefined) user.country = country;
-      if (photoURL !== undefined) user.photoURL = photoURL;
-      if (businessType !== undefined) user.businessType = businessType;
+      const normalizedCompanyName = normalizeOptionalText(companyName);
+      const normalizedFullName = normalizeOptionalText(fullName);
+      const normalizedWhatsapp = normalizeOptionalText(whatsappNumber);
+      const normalizedCountry = normalizeOptionalText(country);
+      const normalizedPhotoURL = normalizeOptionalText(photoURL);
+      const normalizedBusinessType = normalizeOptionalText(businessType);
+
+      if (normalizedCompanyName !== undefined) user.companyName = normalizedCompanyName;
+      if (normalizedFullName !== undefined) user.fullName = normalizedFullName;
+      if (normalizedWhatsapp !== undefined) user.whatsappNumber = normalizedWhatsapp;
+      if (normalizedCountry !== undefined) user.country = normalizedCountry;
+      if (normalizedPhotoURL !== undefined) user.photoURL = normalizedPhotoURL;
+      if (normalizedBusinessType !== undefined) user.businessType = normalizedBusinessType;
       if (address !== undefined) {
+        const nextAddress = typeof address === "object" && address !== null ? address : {};
         user.address = {
-          street: address.street || user.address?.street || "",
-          city: address.city || user.address?.city || "",
-          state: address.state || user.address?.state || "",
-          postalCode: address.postalCode || user.address?.postalCode || "",
-          country: address.country || user.address?.country || "",
+          street: normalizeOptionalText(nextAddress.street) ?? user.address?.street ?? "",
+          city: normalizeOptionalText(nextAddress.city) ?? user.address?.city ?? "",
+          state: normalizeOptionalText(nextAddress.state) ?? user.address?.state ?? "",
+          postalCode: normalizeOptionalText(nextAddress.postalCode) ?? user.address?.postalCode ?? "",
+          country: normalizeOptionalText(nextAddress.country) ?? user.address?.country ?? "",
         };
       }
 

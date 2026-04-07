@@ -584,6 +584,8 @@ const mapInquiry = (inquiry) => ({
   internalNotes: inquiry.internalNotes,
   payment: inquiry.payment,
   linkedInvoice: inquiry.linkedInvoice,
+  hiddenByCustomer: Boolean(inquiry.hiddenByCustomer),
+  hiddenAt: inquiry.hiddenAt || null,
   createdAt: inquiry.createdAt,
   updatedAt: inquiry.updatedAt,
 });
@@ -680,7 +682,10 @@ const placeOrderInquiry = async (req, res) => {
 
 const getMyInquiries = async (req, res) => {
   try {
-    const inquiries = await Inquiry.find({ customer: req.authUser._id })
+    const inquiries = await Inquiry.find({
+      customer: req.authUser._id,
+      hiddenByCustomer: { $ne: true },
+    })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -717,10 +722,6 @@ const getAllInquiries = async (req, res) => {
 
 const deleteInquiry = async (req, res) => {
   try {
-    if (req.authUser?.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Admin access required" });
-    }
-
     const { inquiryId } = req.params;
     if (!inquiryId || !mongoose.Types.ObjectId.isValid(inquiryId)) {
       return res.status(400).json({ success: false, message: "Valid inquiryId is required" });
@@ -731,16 +732,36 @@ const deleteInquiry = async (req, res) => {
       return res.status(404).json({ success: false, message: "Inquiry not found" });
     }
 
-    if (inquiry.linkedInvoice) {
-      return res.status(400).json({
+    const authRole = req.authUser?.role;
+    const isAdmin = authRole === "admin";
+    const isOwner = String(inquiry.customer) === String(req.authUser?._id);
+
+    if (isAdmin) {
+      if (inquiry.linkedInvoice) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot delete an inquiry that already has an invoice",
+        });
+      }
+      await Inquiry.deleteOne({ _id: inquiryId });
+      return res.status(200).json({ success: true, message: "Inquiry deleted successfully" });
+    }
+
+    if (!isOwner) {
+      return res.status(403).json({
         success: false,
-        message: "Cannot delete an inquiry that already has an invoice",
+        message: "You can only delete your own inquiries",
       });
     }
 
-    await Inquiry.deleteOne({ _id: inquiryId });
+    inquiry.hiddenByCustomer = true;
+    inquiry.hiddenAt = new Date();
+    await inquiry.save();
 
-    return res.status(200).json({ success: true, message: "Inquiry deleted successfully" });
+    return res.status(200).json({
+      success: true,
+      message: "Inquiry removed from your dashboard",
+    });
   } catch (error) {
     console.error("Delete inquiry error:", error);
     return res.status(500).json({ success: false, message: "Failed to delete inquiry" });

@@ -21,13 +21,13 @@ router.post("/register", registerUser);
 router.post("/authorized-login", loginAuthorizedPerson);
 
 // GET /api/users - Get all users (for dashboard)
-router.get("/",  getAllUsers);
+router.get("/", authenticate, requireAdmin, getAllUsers);
 
 // GET /api/users/profile/:firebaseUid - Get user profile
-router.get("/profile/:firebaseUid", getUserProfile);
+router.get("/profile/:firebaseUid", authenticate, getUserProfile);
 
 // PUT /api/users/profile/:firebaseUid - Update user profile
-router.put("/profile/:firebaseUid", updateUserProfile);
+router.put("/profile/:firebaseUid", authenticate, updateUserProfile);
 
 // DELETE /api/users/customers/:firebaseUid - Delete customer
 router.delete("/customers/:firebaseUid", authenticate, requireAdmin, deleteUser);

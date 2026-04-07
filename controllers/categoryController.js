@@ -388,6 +388,18 @@ const listPublicProducts = async (req, res) => {
   try {
     const { search, category, subcategory, brand, pattern, isFeatured, all } = req.query;
     const sortBy = String(req.query.sort || "newest");
+    const normalize = (value = "") => String(value).trim().toLowerCase();
+    const isVehicleTruckTireDataset =
+      normalize(category) === "vehicle parts and accessories" &&
+      ["truck tires", "truck tyre", "truck tyres"].includes(normalize(subcategory)) &&
+      !brand &&
+      sortBy === "newest";
+    const doubleCoinClause = {
+      $or: [
+        { brand: { $regex: "^double\\s*coin$", $options: "i" } },
+        { "keyAttributes.Brand": { $regex: "^double\\s*coin$", $options: "i" } },
+      ],
+    };
 
     const andClauses = [{ isActive: true }];
 
@@ -448,13 +460,25 @@ const listPublicProducts = async (req, res) => {
     else if (sortBy === "brand-desc") sortStage = { brand: -1, name: 1 };
 
     if (String(all).toLowerCase() === "true") {
-      const [products, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
-        Product.find(filter).sort(sortStage).populate("category"),
+      const [priorityProducts, otherProducts, productsDefault, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
+        isVehicleTruckTireDataset
+          ? Product.find({ $and: [filter, doubleCoinClause] }).sort(sortStage).populate("category")
+          : Promise.resolve([]),
+        isVehicleTruckTireDataset
+          ? Product.find({ $and: [filter, { $nor: doubleCoinClause.$or }] }).sort(sortStage).populate("category")
+          : Promise.resolve([]),
+        isVehicleTruckTireDataset
+          ? Promise.resolve([])
+          : Product.find(filter).sort(sortStage).populate("category"),
         Product.distinct("brand", facetFilter),
         Product.distinct("keyAttributes.Brand", facetFilter),
         Product.distinct("pattern", facetFilter),
         Product.distinct("keyAttributes.Pattern", facetFilter),
       ]);
+
+      const products = isVehicleTruckTireDataset
+        ? [...priorityProducts, ...otherProducts]
+        : productsDefault;
 
       const brands = Array.from(
         new Set(
@@ -481,14 +505,67 @@ const listPublicProducts = async (req, res) => {
 
     const { page, limit, skip } = buildPaging(req.query, { defaultLimit: 50, maxLimit: 200 });
 
-    const [products, total, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
-      Product.find(filter).sort(sortStage).skip(skip).limit(limit).populate("category"),
-      Product.countDocuments(filter),
-      Product.distinct("brand", facetFilter),
-      Product.distinct("keyAttributes.Brand", facetFilter),
-      Product.distinct("pattern", facetFilter),
-      Product.distinct("keyAttributes.Pattern", facetFilter),
-    ]);
+    let products = [];
+    let total = 0;
+    let brandsDirect = [];
+    let brandsFromAttributes = [];
+    let patternsDirect = [];
+    let patternsFromAttributes = [];
+
+    if (isVehicleTruckTireDataset) {
+      const [priorityCount, otherCount, bd, bfa, pd, pfa] = await Promise.all([
+        Product.countDocuments({ $and: [filter, doubleCoinClause] }),
+        Product.countDocuments({ $and: [filter, { $nor: doubleCoinClause.$or }] }),
+        Product.distinct("brand", facetFilter),
+        Product.distinct("keyAttributes.Brand", facetFilter),
+        Product.distinct("pattern", facetFilter),
+        Product.distinct("keyAttributes.Pattern", facetFilter),
+      ]);
+
+      total = priorityCount + otherCount;
+      brandsDirect = bd;
+      brandsFromAttributes = bfa;
+      patternsDirect = pd;
+      patternsFromAttributes = pfa;
+
+      if (skip < priorityCount) {
+        const priorityLimit = Math.min(limit, priorityCount - skip);
+        const remainingLimit = limit - priorityLimit;
+
+        const [priorityChunk, otherChunk] = await Promise.all([
+          Product.find({ $and: [filter, doubleCoinClause] })
+            .sort(sortStage)
+            .skip(skip)
+            .limit(priorityLimit)
+            .populate("category"),
+          remainingLimit > 0
+            ? Product.find({ $and: [filter, { $nor: doubleCoinClause.$or }] })
+                .sort(sortStage)
+                .skip(0)
+                .limit(remainingLimit)
+                .populate("category")
+            : Promise.resolve([]),
+        ]);
+
+        products = [...priorityChunk, ...otherChunk];
+      } else {
+        products = await Product.find({ $and: [filter, { $nor: doubleCoinClause.$or }] })
+          .sort(sortStage)
+          .skip(skip - priorityCount)
+          .limit(limit)
+          .populate("category");
+      }
+    } else {
+      [products, total, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] =
+        await Promise.all([
+          Product.find(filter).sort(sortStage).skip(skip).limit(limit).populate("category"),
+          Product.countDocuments(filter),
+          Product.distinct("brand", facetFilter),
+          Product.distinct("keyAttributes.Brand", facetFilter),
+          Product.distinct("pattern", facetFilter),
+          Product.distinct("keyAttributes.Pattern", facetFilter),
+        ]);
+    }
 
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const brands = Array.from(

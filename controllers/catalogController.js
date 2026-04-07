@@ -801,6 +801,8 @@ const deleteProduct = async (req, res) => {
 const listMedia = async (req, res) => {
   try {
     const search = String(req.query.search || "").trim();
+    const paginate = req.query.paginate === "true" || req.query.page || req.query.limit;
+    const { page, limit, skip } = buildPaging(req.query, { defaultLimit: 24, maxLimit: 200 });
     const filter = search
       ? {
           $or: [
@@ -811,8 +813,40 @@ const listMedia = async (req, res) => {
         }
       : {};
 
-    const media = await MediaAsset.find(filter).sort({ createdAt: -1 });
-    res.json({ success: true, media });
+    if (!paginate) {
+      const media = await MediaAsset.find(filter).sort({ createdAt: -1 });
+      return res.json({
+        success: true,
+        media,
+        pagination: {
+          page: 1,
+          limit: media.length || 1,
+          total: media.length,
+          totalPages: 1,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      });
+    }
+
+    const [media, total] = await Promise.all([
+      MediaAsset.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      MediaAsset.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    res.json({
+      success: true,
+      media,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

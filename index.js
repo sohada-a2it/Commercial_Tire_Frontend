@@ -53,10 +53,12 @@ seedDefaultAdmin();
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   "http://localhost:3000",
+  "http://localhost:5000",
   "http://127.0.0.1:3000",
   "https://asianimportexport.com",
   "https://www.asianimportexport.com",
-  "https://asian-import-export-co-backend.vercel.app",
+  "https://asian-expo-impo-backend-dashbaord.vercel.app",
+  "*"
 ].filter(Boolean);
 
 app.use(

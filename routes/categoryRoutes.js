@@ -5,6 +5,8 @@ const {
   updateCategory,
   deleteCategory,
   getCategory,
+  listPublicProducts,
+  getPublicProduct,
 } = require("../controllers/categoryController");
 const { authenticate, requireAdmin, requireStaff } = require("../middleware/auth");
 
@@ -16,6 +18,10 @@ const router = express.Router();
 
 // GET /api/categories - List all categories with pagination
 router.get("/",  listCategories);
+
+// Public product reads for storefront
+router.get("/public/products", listPublicProducts);
+router.get("/public/products/:productId", getPublicProduct);
 
 // GET /api/categories/:categoryId - Get a single category
 router.get("/:categoryId", authenticate, requireStaff, getCategory);

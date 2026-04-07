@@ -614,8 +614,12 @@ const sendInvoiceEmail = async (invoice) => {
   }
 
   const pdfBuffer = await generateInvoicePdfBuffer(invoice);
-  const customer = invoice.customerSnapshot;
-  const customerEmail = sanitizeText(customer?.email || "", "").toLowerCase();
+  const customer = invoice.customerSnapshot || {};
+  const accountCustomer = await User.findById(invoice.customer).select("email").lean();
+  const customerEmail = sanitizeText(
+    accountCustomer?.email || customer?.email || "",
+    ""
+  ).toLowerCase();
   const senderAddress = process.env.SMTP_USER || process.env.OWNER_EMAIL || SALES_EMAIL;
   const rows = (invoice.items || [])
     .map(
@@ -1040,6 +1044,27 @@ const createInvoiceFromInquiry = async (req, res) => {
         paymentMethod: inquiry.paymentMethod,
       },
     });
+
+    const accountCustomer = await User.findById(inquiry.customer)
+      .select("email")
+      .session(session);
+    const accountEmail = sanitizeText(
+      accountCustomer?.email || inquiry.customerSnapshot?.email || "",
+      ""
+    ).toLowerCase();
+
+    if (!accountEmail) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Customer account email is missing",
+      });
+    }
+
+    // Always keep invoice email aligned with login/register account email.
+    customerSnapshot.email = accountEmail;
+
     const missingCustomerField = validateCustomerSnapshot(customerSnapshot);
     if (missingCustomerField) {
       await session.abortTransaction();

@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Category = require("../models/Category");
 const Product = require("../models/Product");
 
@@ -157,6 +158,50 @@ const mapCategory = (category) => ({
   createdAt: category.createdAt,
   updatedAt: category.updatedAt,
 });
+
+const mapPublicProduct = (product) => {
+  const productId = product.sourceId ?? product._id;
+  const imageUrl = typeof product.image === "string" ? product.image : product.image?.url || "";
+
+  return {
+    id: productId,
+    sourceId: product.sourceId,
+    dbId: product._id,
+    name: product.name,
+    slug: product.slug,
+    sku: product.sku,
+    category: product.category?._id || product.category,
+    categoryName: product.categoryName || product.mainCategory || "",
+    categoryIcon: product.categoryIcon || "",
+    subcategoryId: product.subcategoryId,
+    subcategoryName: product.subcategoryName || product.subCategory || "",
+    subcategorySlug: product.subcategorySlug || "",
+    pattern: product.pattern || product.keyAttributes?.Pattern || "",
+    brand: product.brand || product.keyAttributes?.Brand || "",
+    price: product.price,
+    offerPrice: product.offerPrice,
+    pricingTiers: product.pricingTiers || [],
+    customizationOptions: product.customizationOptions || [],
+    shipping: product.shipping,
+    description: product.description,
+    image: imageUrl,
+    images: Array.isArray(product.images)
+      ? product.images
+          .map((asset) => (typeof asset === "string" ? asset : asset?.url || ""))
+          .filter(Boolean)
+      : [],
+    keyAttributes: product.keyAttributes || {},
+    packagingAndDelivery: product.packagingAndDelivery || {},
+    priceSource: product.priceSource,
+    userReviews: product.userReviews || [],
+    tags: product.tags || [],
+    isFeatured: product.isFeatured,
+    isActive: product.isActive,
+    metadata: product.metadata || {},
+    createdAt: product.createdAt,
+    updatedAt: product.updatedAt,
+  };
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONTROLLER FUNCTIONS
@@ -336,6 +381,131 @@ const getCategory = async (req, res) => {
   }
 };
 
+/**
+ * Public product list for storefront (read-only)
+ */
+const listPublicProducts = async (req, res) => {
+  try {
+    const { search, category, subcategory, brand, pattern, isFeatured, all } = req.query;
+    const sortBy = String(req.query.sort || "newest");
+
+    const andClauses = [{ isActive: true }];
+
+    if (search) {
+      const regex = { $regex: String(search), $options: "i" };
+      andClauses.push({
+        $or: [
+        { name: regex },
+        { slug: regex },
+        { description: regex },
+        { brand: regex },
+        { "keyAttributes.Brand": regex },
+        { pattern: regex },
+        { "keyAttributes.Pattern": regex },
+        { categoryName: regex },
+        { subcategoryName: regex },
+        ],
+      });
+    }
+
+    if (category) {
+      andClauses.push({ categoryName: { $regex: String(category), $options: "i" } });
+    }
+
+    if (subcategory) {
+      andClauses.push({ subcategoryName: { $regex: String(subcategory), $options: "i" } });
+    }
+
+    if (brand) {
+      const regex = { $regex: String(brand), $options: "i" };
+      andClauses.push({ $or: [{ brand: regex }, { "keyAttributes.Brand": regex }] });
+    }
+
+    if (pattern) {
+      const regex = { $regex: String(pattern), $options: "i" };
+      andClauses.push({ $or: [{ pattern: regex }, { "keyAttributes.Pattern": regex }] });
+    }
+
+    if (isFeatured !== undefined) {
+      andClauses.push({ isFeatured: String(isFeatured).toLowerCase() === "true" });
+    }
+
+    const filter = andClauses.length === 1 ? andClauses[0] : { $and: andClauses };
+
+    let sortStage = { createdAt: -1 };
+    if (sortBy === "name-asc") sortStage = { name: 1, createdAt: -1 };
+    else if (sortBy === "name-desc") sortStage = { name: -1, createdAt: -1 };
+    else if (sortBy === "brand-asc") sortStage = { brand: 1, name: 1 };
+    else if (sortBy === "brand-desc") sortStage = { brand: -1, name: 1 };
+
+    if (String(all).toLowerCase() === "true") {
+      const products = await Product.find(filter).sort(sortStage).populate("category");
+      return res.json({ success: true, products: products.map(mapPublicProduct) });
+    }
+
+    const { page, limit, skip } = buildPaging(req.query, { defaultLimit: 50, maxLimit: 200 });
+
+    const [products, total] = await Promise.all([
+      Product.find(filter).sort(sortStage).skip(skip).limit(limit).populate("category"),
+      Product.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    res.json({
+      success: true,
+      products: products.map(mapPublicProduct),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Public single product lookup for storefront (read-only)
+ */
+const getPublicProduct = async (req, res) => {
+  try {
+    const routeId = String(req.params.productId || "").trim();
+    if (!routeId) {
+      return res.status(400).json({ success: false, message: "Product id is required" });
+    }
+
+    const numericSourceId = Number.parseInt(routeId, 10);
+    const clauses = [{ sourceId: Number.isFinite(numericSourceId) ? numericSourceId : null }].filter(
+      (clause) => clause.sourceId !== null
+    );
+    if (mongoose.Types.ObjectId.isValid(routeId)) {
+      clauses.push({ _id: routeId });
+    }
+
+    if (!clauses.length) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    const product = await Product.findOne({
+      isActive: true,
+      ...(clauses.length === 1 ? clauses[0] : { $or: clauses }),
+    }).populate("category");
+
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    res.json({ success: true, product: mapPublicProduct(product) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -346,6 +516,8 @@ module.exports = {
   updateCategory,
   deleteCategory,
   getCategory,
+  listPublicProducts,
+  getPublicProduct,
   normalizeCategoryPayload,
   normalizeSubcategories,
   mapCategory,

@@ -15,15 +15,26 @@ const GENERAL_CONTACT_EMAIL = process.env.GENERAL_CONTACT_EMAIL || "info@asianim
 const SALES_EMAIL = process.env.SALES_EMAIL || "sale@asianimportexport.com";
 
 const resolveSmtpHost = (rawHost, userEmail) => {
-  const host = String(rawHost || "").trim();
-  if (host && !host.includes("@")) return host;
+  const host = String(rawHost || "").trim().toLowerCase();
+  const domain = String(userEmail || "").split("@")[1]?.toLowerCase() || "";
 
-  const domain = String(userEmail || "").split("@")[1]?.toLowerCase();
   if (domain === "gmail.com") return "smtp.gmail.com";
   if (domain === "outlook.com" || domain === "hotmail.com" || domain === "live.com") {
     return "smtp.office365.com";
   }
-  return "smtp.hostinger.com";
+
+  if (!host || host.includes("@")) return "smtp.hostinger.com";
+
+  // If only the website domain is given (e.g. asianimportexport.com), convert to a usable SMTP host.
+  const looksLikePlainDomain = host.includes(".") && !host.startsWith("smtp.") && !host.startsWith("mail.");
+  if (looksLikePlainDomain) {
+    if (host === "asianimportexport.com" || domain === "asianimportexport.com") {
+      return "smtp.hostinger.com";
+    }
+    return `smtp.${host}`;
+  }
+
+  return host;
 };
 
 const createMailTransporter = () => {

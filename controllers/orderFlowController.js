@@ -189,10 +189,22 @@ const validateCustomerSnapshot = (snapshot) => {
 };
 
 const createTransporter = () => {
-  const host = process.env.SMTP_HOST || "smtp.hostinger.com";
+  const user = String(process.env.SMTP_USER || process.env.OWNER_EMAIL || "").trim();
+  const pass = String(process.env.SMTP_PASSWORD || "").replace(/\s+/g, "");
+  const rawHost = String(process.env.SMTP_HOST || "").trim();
+  let host = rawHost;
+
+  if (!host || host.includes("@")) {
+    const domain = user.split("@")[1]?.toLowerCase();
+    if (domain === "gmail.com") host = "smtp.gmail.com";
+    else if (domain === "outlook.com" || domain === "hotmail.com" || domain === "live.com") {
+      host = "smtp.office365.com";
+    } else {
+      host = "smtp.hostinger.com";
+    }
+  }
+
   const port = Number(process.env.SMTP_PORT || 465);
-  const user = process.env.SMTP_USER || process.env.OWNER_EMAIL;
-  const pass = process.env.SMTP_PASSWORD;
 
   if (!user || !pass) {
     return null;
@@ -219,6 +231,8 @@ const COMPANY_INFO = {
   address:
     "63/16 Soi Chumchon Talat Tha Ruea Khlong Toei Khwaeng Khlong Toei, Khet Khlong Toei Krung Thep Maha Nakhon 10110, Thailand",
 };
+
+const SALES_EMAIL = process.env.SALES_EMAIL || "sale@asianimportexport.com";
 
 const getLineValue = (text, label) => {
   if (!text) return "";
@@ -483,6 +497,112 @@ const generateInvoicePdfBuffer = (invoice) =>
     doc.end();
   });
 
+const sendInquiryReceivedEmails = async (inquiry) => {
+  const transporter = createTransporter();
+
+  if (!transporter) {
+    return {
+      sent: false,
+      message: "SMTP credentials not configured",
+    };
+  }
+
+  const senderAddress = process.env.SMTP_USER || process.env.OWNER_EMAIL || SALES_EMAIL;
+  const customer = inquiry.customerSnapshot || {};
+  const customerEmail = sanitizeText(customer.email, "").toLowerCase();
+
+  const itemRows = (inquiry.items || [])
+    .map(
+      (item) => `
+        <tr>
+          <td style="border:1px solid #ddd;padding:8px;">${item.title || item.name}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:center;">${item.quantity}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:right;">$${Number(item.unitPrice || 0).toFixed(2)}</td>
+          <td style="border:1px solid #ddd;padding:8px;text-align:right;">$${Number(item.lineTotal || 0).toFixed(2)}</td>
+        </tr>
+      `
+    )
+    .join("");
+
+  const customerHtml = `
+    <div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;color:#1f2937;">
+      <h2 style="margin-bottom:8px;">Inquiry Received (${inquiry.inquiryNumber})</h2>
+      <p style="margin-top:0;">Hello ${customer.name || "Customer"}, we have received your inquiry from checkout.</p>
+      <p>Our sales team will review and send your invoice soon.</p>
+      <p><strong>Inquiry Number:</strong> ${inquiry.inquiryNumber}<br/>
+      <strong>Payment Method:</strong> ${paymentMethodLabel(customer.paymentMethod)}<br/>
+      <strong>Total:</strong> $${Number(inquiry.total || 0).toFixed(2)}</p>
+
+      <table style="border-collapse:collapse;width:100%;margin:14px 0;">
+        <thead>
+          <tr style="background:#0f766e;color:#fff;">
+            <th style="border:1px solid #0f766e;padding:8px;text-align:left;">Product</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:center;">Qty</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Unit</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+    </div>
+  `;
+
+  const adminHtml = `
+    <div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;color:#1f2937;">
+      <h2 style="margin-bottom:8px;">New Checkout Inquiry (${inquiry.inquiryNumber})</h2>
+      <p style="margin-top:0;">A customer submitted a checkout inquiry.</p>
+      <p><strong>Customer:</strong> ${customer.name || "N/A"}<br/>
+      <strong>Login/Register Email:</strong> ${customerEmail || "N/A"}<br/>
+      <strong>Phone:</strong> ${customer.phone || "N/A"}<br/>
+      <strong>Address:</strong> ${[customer.address, customer.city, customer.state, customer.zipCode].filter(Boolean).join(", ") || "N/A"}</p>
+      ${customer.notes ? `<p><strong>Notes:</strong> ${customer.notes}</p>` : ""}
+
+      <table style="border-collapse:collapse;width:100%;margin:14px 0;">
+        <thead>
+          <tr style="background:#0f766e;color:#fff;">
+            <th style="border:1px solid #0f766e;padding:8px;text-align:left;">Product</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:center;">Qty</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Unit</th>
+            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+
+      <p><strong>Total:</strong> $${Number(inquiry.total || 0).toFixed(2)}<br/>
+      <strong>Payment Method:</strong> ${paymentMethodLabel(customer.paymentMethod)}</p>
+    </div>
+  `;
+
+  const mailTasks = [
+    transporter.sendMail({
+      from: `"Asian Import Export Co" <${senderAddress}>`,
+      to: SALES_EMAIL,
+      replyTo: customerEmail || undefined,
+      subject: `New Inquiry ${inquiry.inquiryNumber} from Checkout`,
+      html: adminHtml,
+    }),
+  ];
+
+  if (customerEmail) {
+    mailTasks.push(
+      transporter.sendMail({
+        from: `"Asian Import Export Co" <${senderAddress}>`,
+        to: customerEmail,
+        subject: `Inquiry ${inquiry.inquiryNumber} received`,
+        html: customerHtml,
+      })
+    );
+  }
+
+  await Promise.all(mailTasks);
+
+  return {
+    sent: true,
+    message: "Inquiry emails sent",
+  };
+};
+
 const sendInvoiceEmail = async (invoice) => {
   const transporter = createTransporter();
 
@@ -495,6 +615,8 @@ const sendInvoiceEmail = async (invoice) => {
 
   const pdfBuffer = await generateInvoicePdfBuffer(invoice);
   const customer = invoice.customerSnapshot;
+  const customerEmail = sanitizeText(customer?.email || "", "").toLowerCase();
+  const senderAddress = process.env.SMTP_USER || process.env.OWNER_EMAIL || SALES_EMAIL;
   const rows = (invoice.items || [])
     .map(
       (item) => `
@@ -549,23 +671,52 @@ const sendInvoiceEmail = async (invoice) => {
     </div>
   `;
 
-  await transporter.sendMail({
-    from: `"Asian Import Export Co" <${process.env.SMTP_USER || process.env.OWNER_EMAIL}>`,
-    to: customer.email,
-    cc: process.env.OWNER_EMAIL || undefined,
-    subject: `Invoice ${invoice.invoiceNumber} from Asian Import Export`,
-    html,
-    attachments: [
-      {
-        filename: `${invoice.invoiceNumber}.pdf`,
-        content: pdfBuffer,
-      },
-    ],
-  });
+  const adminHtml = `
+    <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;color:#1f2937;">
+      <h2 style="margin-bottom:8px;">Invoice Generated: ${invoice.invoiceNumber}</h2>
+      <p style="margin-top:0;">This invoice has been generated and is attached as a PDF.</p>
+      <p><strong>Customer:</strong> ${customer?.name || "N/A"}<br/>
+      <strong>Customer Email:</strong> ${customerEmail || "N/A"}<br/>
+      <strong>Total:</strong> $${Number(invoice.total || 0).toFixed(2)}<br/>
+      <strong>Payment Status:</strong> ${paymentStatusLabel(invoice.paymentStatus)}</p>
+      ${html}
+    </div>
+  `;
+
+  const attachments = [
+    {
+      filename: `${invoice.invoiceNumber}.pdf`,
+      content: pdfBuffer,
+    },
+  ];
+
+  const deliveries = [
+    transporter.sendMail({
+      from: `"Asian Import Export Co" <${senderAddress}>`,
+      to: SALES_EMAIL,
+      subject: `Invoice ${invoice.invoiceNumber} generated`,
+      html: adminHtml,
+      attachments,
+    }),
+  ];
+
+  if (customerEmail) {
+    deliveries.push(
+      transporter.sendMail({
+        from: `"Asian Import Export Co" <${senderAddress}>`,
+        to: customerEmail,
+        subject: `Invoice ${invoice.invoiceNumber} from Asian Import Export`,
+        html,
+        attachments,
+      })
+    );
+  }
+
+  await Promise.all(deliveries);
 
   return {
     sent: true,
-    message: "Invoice email sent",
+    message: "Invoice emails sent to sales and customer",
   };
 };
 
@@ -641,6 +792,10 @@ const placeOrderInquiry = async (req, res) => {
     }
 
     const customerSnapshot = normalizeCustomerSnapshot({ customer, authUser });
+    const accountEmail = sanitizeText(authUser.email || "", "").toLowerCase();
+    if (accountEmail) {
+      customerSnapshot.email = accountEmail;
+    }
     const missingField = validateCustomerSnapshot(customerSnapshot);
 
     if (missingField) {
@@ -665,10 +820,25 @@ const placeOrderInquiry = async (req, res) => {
       status: "in_process",
     });
 
+    let emailDelivery = {
+      sent: false,
+      message: "Inquiry email not attempted",
+    };
+    try {
+      emailDelivery = await sendInquiryReceivedEmails(inquiry);
+    } catch (emailError) {
+      emailDelivery = {
+        sent: false,
+        message: emailError.message || "Failed to send inquiry email",
+      };
+      console.error("Inquiry email send error:", emailError);
+    }
+
     return res.status(201).json({
       success: true,
       message: "Inquiry created successfully",
       inquiry: mapInquiry(inquiry),
+      emailDelivery,
     });
   } catch (error) {
     console.error("Place order inquiry error:", error);

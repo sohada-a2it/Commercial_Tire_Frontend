@@ -11,6 +11,40 @@ const categoryRoutes = require("./routes/categoryRoutes");
 
 const app = express();
 
+const GENERAL_CONTACT_EMAIL = process.env.GENERAL_CONTACT_EMAIL || "info@asianimportexport.com";
+const SALES_EMAIL = process.env.SALES_EMAIL || "sale@asianimportexport.com";
+
+const resolveSmtpHost = (rawHost, userEmail) => {
+  const host = String(rawHost || "").trim();
+  if (host && !host.includes("@")) return host;
+
+  const domain = String(userEmail || "").split("@")[1]?.toLowerCase();
+  if (domain === "gmail.com") return "smtp.gmail.com";
+  if (domain === "outlook.com" || domain === "hotmail.com" || domain === "live.com") {
+    return "smtp.office365.com";
+  }
+  return "smtp.hostinger.com";
+};
+
+const createMailTransporter = () => {
+  const user = String(process.env.SMTP_USER || process.env.OWNER_EMAIL || "").trim();
+  const pass = String(process.env.SMTP_PASSWORD || "").replace(/\s+/g, "");
+  const host = resolveSmtpHost(process.env.SMTP_HOST, user);
+  const port = Number(process.env.SMTP_PORT || 465);
+
+  if (!user || !pass) return null;
+
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: true,
+    auth: { user, pass },
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
+};
+
 // Connect to MongoDB
 connectDB();
 seedDefaultAdmin();
@@ -62,19 +96,11 @@ app.post("/api/send-email", async (req, res) => {
     shippingTerm, // optional
   } = req.body;
 
-  // Nodemailer transporter with Hostinger SMTP
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || "smtp.hostinger.com",
-    port: parseInt(process.env.SMTP_PORT) || 465,
-    secure: true, // use SSL
-    auth: {
-      user: process.env.SMTP_USER || process.env.OWNER_EMAIL,
-      pass: process.env.SMTP_PASSWORD,
-    },
-    tls: {
-      rejectUnauthorized: false,
-    },
-  });
+  const transporter = createMailTransporter();
+
+  if (!transporter) {
+    return res.status(500).json({ error: "SMTP is not configured" });
+  }
 
   try {
     let emailSubject, textContent, htmlContent;
@@ -209,13 +235,43 @@ app.post("/api/send-email", async (req, res) => {
       `;
     }
 
+    const senderAddress = process.env.SMTP_USER || process.env.OWNER_EMAIL;
+    const isProductInquiry = type === "product_inquiry";
+    const adminRecipient = isProductInquiry ? SALES_EMAIL : GENERAL_CONTACT_EMAIL;
+
     await transporter.sendMail({
-      from: `"Product Inquiry" <${process.env.SMTP_USER}>`,
-      to: type === "product_inquiry" ? "naimaa2it@gmail.com" : "naimaa2it@gmail.com",
+      from: `"Asian Import Export Co" <${senderAddress}>`,
+      to: adminRecipient,
+      replyTo: email,
       subject: emailSubject,
       text: textContent,
       html: htmlContent,
     });
+
+    if (!isProductInquiry && email) {
+      const customerAckSubject = "We received your inquiry - Asian Import Export Co";
+      const customerAckText = `Hello ${name || "Customer"},\n\nThank you for contacting Asian Import Export Co. We have received your inquiry and our team will reply soon.\n\nYour message:\n${message || ""}\n\nBest regards,\nAsian Import Export Co`;
+      const customerAckHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+          <h2 style="color: #0f766e; border-bottom: 2px solid #0f766e; padding-bottom: 6px;">Inquiry Received</h2>
+          <p>Hello ${name || "Customer"},</p>
+          <p>Thank you for contacting <strong>Asian Import Export Co</strong>. We have received your inquiry and our team will reply shortly.</p>
+          <div style="background: #f8fafc; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin-top: 14px;">
+            <p style="margin: 0 0 8px 0;"><strong>Your message:</strong></p>
+            <p style="margin: 0; white-space: pre-wrap;">${message || "No message provided."}</p>
+          </div>
+          <p style="margin-top: 18px;">General contact: <a href="mailto:${GENERAL_CONTACT_EMAIL}" style="color:#0f766e;">${GENERAL_CONTACT_EMAIL}</a></p>
+        </div>
+      `;
+
+      await transporter.sendMail({
+        from: `"Asian Import Export Co" <${senderAddress}>`,
+        to: email,
+        subject: customerAckSubject,
+        text: customerAckText,
+        html: customerAckHtml,
+      });
+    }
 
     res.status(200).json({ success: true });
   } catch (error) {
@@ -228,19 +284,11 @@ app.post("/api/send-email", async (req, res) => {
 app.post("/api/send-invoice", async (req, res) => {
   const { customer, items, subtotal, total, orderDate, paymentMethod } = req.body;
 
-  // Nodemailer transporter
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || "smtp.hostinger.com",
-    port: parseInt(process.env.SMTP_PORT) || 465,
-    secure: true,
-    auth: {
-      user: process.env.SMTP_USER || process.env.OWNER_EMAIL,
-      pass: process.env.SMTP_PASSWORD,
-    },
-    tls: {
-      rejectUnauthorized: false,
-    },
-  });
+  const transporter = createMailTransporter();
+
+  if (!transporter) {
+    return res.status(500).json({ error: "SMTP is not configured" });
+  }
 
   try {
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
@@ -448,7 +496,7 @@ app.post("/api/send-invoice", async (req, res) => {
     // Send email to sales (admin)
     await transporter.sendMail({
       from: `"Website Orders" <${process.env.SMTP_USER}>`,
-      to: "naimaa2it@gmail.com",
+      to: SALES_EMAIL,
       subject: `🔔 New Order Received - ${orderId} - $${total.toFixed(2)}`,
       html: adminEmailHTML,
     });

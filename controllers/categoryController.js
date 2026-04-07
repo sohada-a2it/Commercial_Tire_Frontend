@@ -432,6 +432,15 @@ const listPublicProducts = async (req, res) => {
 
     const filter = andClauses.length === 1 ? andClauses[0] : { $and: andClauses };
 
+    const facetClauses = [{ isActive: true }];
+    if (category) {
+      facetClauses.push({ categoryName: { $regex: String(category), $options: "i" } });
+    }
+    if (subcategory) {
+      facetClauses.push({ subcategoryName: { $regex: String(subcategory), $options: "i" } });
+    }
+    const facetFilter = facetClauses.length === 1 ? facetClauses[0] : { $and: facetClauses };
+
     let sortStage = { createdAt: -1 };
     if (sortBy === "name-asc") sortStage = { name: 1, createdAt: -1 };
     else if (sortBy === "name-desc") sortStage = { name: -1, createdAt: -1 };
@@ -439,18 +448,64 @@ const listPublicProducts = async (req, res) => {
     else if (sortBy === "brand-desc") sortStage = { brand: -1, name: 1 };
 
     if (String(all).toLowerCase() === "true") {
-      const products = await Product.find(filter).sort(sortStage).populate("category");
-      return res.json({ success: true, products: products.map(mapPublicProduct) });
+      const [products, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
+        Product.find(filter).sort(sortStage).populate("category"),
+        Product.distinct("brand", facetFilter),
+        Product.distinct("keyAttributes.Brand", facetFilter),
+        Product.distinct("pattern", facetFilter),
+        Product.distinct("keyAttributes.Pattern", facetFilter),
+      ]);
+
+      const brands = Array.from(
+        new Set(
+          [...(brandsDirect || []), ...(brandsFromAttributes || [])]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      const patterns = Array.from(
+        new Set(
+          [...(patternsDirect || []), ...(patternsFromAttributes || [])]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      return res.json({
+        success: true,
+        products: products.map(mapPublicProduct),
+        filters: { brands, patterns },
+      });
     }
 
     const { page, limit, skip } = buildPaging(req.query, { defaultLimit: 50, maxLimit: 200 });
 
-    const [products, total] = await Promise.all([
+    const [products, total, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
       Product.find(filter).sort(sortStage).skip(skip).limit(limit).populate("category"),
       Product.countDocuments(filter),
+      Product.distinct("brand", facetFilter),
+      Product.distinct("keyAttributes.Brand", facetFilter),
+      Product.distinct("pattern", facetFilter),
+      Product.distinct("keyAttributes.Pattern", facetFilter),
     ]);
 
     const totalPages = Math.max(1, Math.ceil(total / limit));
+    const brands = Array.from(
+      new Set(
+        [...(brandsDirect || []), ...(brandsFromAttributes || [])]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+    const patterns = Array.from(
+      new Set(
+        [...(patternsDirect || []), ...(patternsFromAttributes || [])]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
 
     res.json({
       success: true,
@@ -463,6 +518,7 @@ const listPublicProducts = async (req, res) => {
         hasNextPage: page < totalPages,
         hasPrevPage: page > 1,
       },
+      filters: { brands, patterns },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

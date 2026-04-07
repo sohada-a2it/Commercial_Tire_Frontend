@@ -525,52 +525,76 @@ const sendInquiryReceivedEmails = async (inquiry) => {
     .join("");
 
   const customerHtml = `
-    <div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;color:#1f2937;">
-      <h2 style="margin-bottom:8px;">Inquiry Received (${inquiry.inquiryNumber})</h2>
-      <p style="margin-top:0;">Hello ${customer.name || "Customer"}, we have received your inquiry from checkout.</p>
-      <p>Our sales team will review and send your invoice soon.</p>
-      <p><strong>Inquiry Number:</strong> ${inquiry.inquiryNumber}<br/>
-      <strong>Payment Method:</strong> ${paymentMethodLabel(customer.paymentMethod)}<br/>
-      <strong>Total:</strong> $${Number(inquiry.total || 0).toFixed(2)}</p>
+    <div style="background:#f3f6fb;padding:24px 12px;font-family:Arial,sans-serif;color:#1f2937;">
+      <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ef;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
+        <div style="background:linear-gradient(120deg,#0f766e,#14b8a6);padding:20px 24px;color:#fff;">
+          <div style="font-size:12px;opacity:0.9;letter-spacing:0.4px;">CHECKOUT INQUIRY RECEIVED</div>
+          <h2 style="margin:8px 0 2px 0;font-size:26px;">${inquiry.inquiryNumber}</h2>
+          <div style="font-size:14px;opacity:0.95;">Hello ${customer.name || "Customer"}, our sales team will contact and confirm shortly.</div>
+        </div>
 
-      <table style="border-collapse:collapse;width:100%;margin:14px 0;">
-        <thead>
-          <tr style="background:#0f766e;color:#fff;">
-            <th style="border:1px solid #0f766e;padding:8px;text-align:left;">Product</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:center;">Qty</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Unit</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Total</th>
-          </tr>
-        </thead>
-        <tbody>${itemRows}</tbody>
-      </table>
+        <div style="padding:18px 22px;">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+            <span style="background:#ecfeff;color:#0f766e;border:1px solid #99f6e4;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;">Payment: ${paymentMethodLabel(customer.paymentMethod)}</span>
+            <span style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;">Total: $${Number(inquiry.total || 0).toFixed(2)}</span>
+          </div>
+
+          <table style="border-collapse:collapse;width:100%;margin:14px 0;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+            <thead>
+              <tr style="background:#0f766e;color:#fff;">
+                <th style="padding:10px;text-align:left;">Product</th>
+                <th style="padding:10px;text-align:center;">Qty</th>
+                <th style="padding:10px;text-align:right;">Unit</th>
+                <th style="padding:10px;text-align:right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>${itemRows}</tbody>
+          </table>
+
+          <p style="margin:14px 0 0 0;font-size:14px;color:#475569;">
+            Thank you for choosing Asian Import Export Co. We will send your invoice very shortly.
+          </p>
+        </div>
+      </div>
     </div>
   `;
 
   const adminHtml = `
-    <div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;color:#1f2937;">
-      <h2 style="margin-bottom:8px;">New Checkout Inquiry (${inquiry.inquiryNumber})</h2>
-      <p style="margin-top:0;">A customer submitted a checkout inquiry.</p>
-      <p><strong>Customer:</strong> ${customer.name || "N/A"}<br/>
-      <strong>Login/Register Email:</strong> ${customerEmail || "N/A"}<br/>
-      <strong>Phone:</strong> ${customer.phone || "N/A"}<br/>
-      <strong>Address:</strong> ${[customer.address, customer.city, customer.state, customer.zipCode].filter(Boolean).join(", ") || "N/A"}</p>
-      ${customer.notes ? `<p><strong>Notes:</strong> ${customer.notes}</p>` : ""}
+    <div style="background:#f3f6fb;padding:24px 12px;font-family:Arial,sans-serif;color:#1f2937;">
+      <div style="max-width:760px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ef;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
+        <div style="background:linear-gradient(120deg,#111827,#1f2937);padding:20px 24px;color:#fff;">
+          <div style="font-size:12px;opacity:0.9;letter-spacing:0.4px;">NEW CHECKOUT INQUIRY</div>
+          <h2 style="margin:8px 0 2px 0;font-size:25px;">${inquiry.inquiryNumber}</h2>
+          <div style="font-size:14px;opacity:0.9;">Customer inquiry received and ready for follow-up.</div>
+        </div>
 
-      <table style="border-collapse:collapse;width:100%;margin:14px 0;">
-        <thead>
-          <tr style="background:#0f766e;color:#fff;">
-            <th style="border:1px solid #0f766e;padding:8px;text-align:left;">Product</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:center;">Qty</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Unit</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Total</th>
-          </tr>
-        </thead>
-        <tbody>${itemRows}</tbody>
-      </table>
+        <div style="padding:18px 22px;">
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:14px;line-height:1.55;">
+            <div><strong>Customer:</strong> ${customer.name || "N/A"}</div>
+            <div><strong>Login/Register Email:</strong> ${customerEmail || "N/A"}</div>
+            <div><strong>Phone:</strong> ${customer.phone || "N/A"}</div>
+            <div><strong>Address:</strong> ${[customer.address, customer.city, customer.state, customer.zipCode].filter(Boolean).join(", ") || "N/A"}</div>
+            ${customer.notes ? `<div><strong>Notes:</strong> ${customer.notes}</div>` : ""}
+          </div>
 
-      <p><strong>Total:</strong> $${Number(inquiry.total || 0).toFixed(2)}<br/>
-      <strong>Payment Method:</strong> ${paymentMethodLabel(customer.paymentMethod)}</p>
+          <table style="border-collapse:collapse;width:100%;margin:14px 0;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+            <thead>
+              <tr style="background:#0f766e;color:#fff;">
+                <th style="padding:10px;text-align:left;">Product</th>
+                <th style="padding:10px;text-align:center;">Qty</th>
+                <th style="padding:10px;text-align:right;">Unit</th>
+                <th style="padding:10px;text-align:right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>${itemRows}</tbody>
+          </table>
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <span style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;">Total: $${Number(inquiry.total || 0).toFixed(2)}</span>
+            <span style="background:#ecfeff;color:#0f766e;border:1px solid #99f6e4;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;">Payment: ${paymentMethodLabel(customer.paymentMethod)}</span>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -636,54 +660,72 @@ const sendInvoiceEmail = async (invoice) => {
     .join("");
 
   const html = `
-    <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;color:#1f2937;">
-      <h2 style="margin-bottom:8px;">Invoice ${invoice.invoiceNumber}</h2>
-      <p style="margin-top:0;">Hello ${customer.name}, your invoice is ready. A PDF copy is attached.</p>
+    <div style="background:#f3f6fb;padding:24px 12px;font-family:Arial,sans-serif;color:#1f2937;">
+      <div style="max-width:760px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ef;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
+        <div style="background:linear-gradient(120deg,#0f766e,#14b8a6);padding:20px 24px;color:#fff;">
+          <div style="font-size:12px;opacity:0.9;letter-spacing:0.4px;">INVOICE READY</div>
+          <h2 style="margin:8px 0 2px 0;font-size:26px;">${invoice.invoiceNumber}</h2>
+          <div style="font-size:14px;opacity:0.95;">Hello ${customer.name || "Customer"}, your invoice summary is below. PDF is attached.</div>
+        </div>
 
-      <div style="background:#f8fafc;border:1px solid #e5e7eb;padding:12px;border-radius:6px;margin:16px 0;">
-        <p style="margin:0 0 6px 0;"><strong>Payment Method:</strong> ${paymentMethodLabel(
-          customer.paymentMethod
-        )}</p>
-        <p style="margin:0;"><strong>Payment Status:</strong> ${paymentStatusLabel(invoice.paymentStatus)}</p>
+        <div style="padding:18px 22px;">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+            <span style="background:#ecfeff;color:#0f766e;border:1px solid #99f6e4;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;">Payment: ${paymentMethodLabel(customer.paymentMethod)}</span>
+            <span style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;">Status: ${paymentStatusLabel(invoice.paymentStatus)}</span>
+            <span style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700;">Total: $${Number(invoice.total || 0).toFixed(2)}</span>
+          </div>
+
+          <table style="border-collapse:collapse;width:100%;margin:12px 0;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+            <thead>
+              <tr style="background:#0f766e;color:#fff;">
+                <th style="padding:10px;text-align:left;">Product</th>
+                <th style="padding:10px;text-align:center;">Qty</th>
+                <th style="padding:10px;text-align:right;">Unit</th>
+                <th style="padding:10px;text-align:right;">Discount</th>
+                <th style="padding:10px;text-align:right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;line-height:1.65;">
+            <div><strong>Product subtotal:</strong> $${Number(invoice.productSubtotal || 0).toFixed(2)}</div>
+            <div><strong>VAT:</strong> $${Number(invoice.vatAmount || 0).toFixed(2)}</div>
+            <div><strong>Discount:</strong> -$${Number(invoice.discountAmount || 0).toFixed(2)}</div>
+            <div><strong>Shipping:</strong> $${Number(invoice.shippingCost || 0).toFixed(2)}</div>
+            <div><strong>Total:</strong> $${Number(invoice.total || 0).toFixed(2)}</div>
+            <div><strong>Paid:</strong> $${Number(invoice.paidAmount || 0).toFixed(2)}</div>
+            <div><strong>Balance Due:</strong> $${Number(invoice.balanceDue || 0).toFixed(2)}</div>
+          </div>
+
+          ${invoice.notes ? `<p style="margin:12px 0 0 0;"><strong>Notes:</strong> ${invoice.notes}</p>` : ""}
+          ${invoice.extraNotes ? `<p style="margin:8px 0 0 0;"><strong>Extra Notes:</strong> ${invoice.extraNotes}</p>` : ""}
+          ${invoice.termsAndConditions ? `<p style="margin:8px 0 0 0;"><strong>Terms & Conditions:</strong> ${invoice.termsAndConditions}</p>` : ""}
+          ${invoice.additionalMessages ? `<p style="margin:8px 0 0 0;"><strong>Additional Messages:</strong> ${invoice.additionalMessages}</p>` : ""}
+        </div>
       </div>
-
-      <table style="border-collapse:collapse;width:100%;margin:12px 0;">
-        <thead>
-          <tr style="background:#0f766e;color:#fff;">
-            <th style="border:1px solid #0f766e;padding:8px;text-align:left;">Product</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:center;">Qty</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Unit</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Discount</th>
-            <th style="border:1px solid #0f766e;padding:8px;text-align:right;">Total</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-
-      <p><strong>Product subtotal:</strong> $${Number(invoice.productSubtotal || 0).toFixed(2)}<br/>
-      <strong>VAT:</strong> $${Number(invoice.vatAmount || 0).toFixed(2)}<br/>
-      <strong>Discount:</strong> -$${Number(invoice.discountAmount || 0).toFixed(2)}<br/>
-      <strong>Shipping:</strong> $${Number(invoice.shippingCost || 0).toFixed(2)}<br/>
-      <strong>Total:</strong> $${Number(invoice.total || 0).toFixed(2)}<br/>
-      <strong>Paid:</strong> $${Number(invoice.paidAmount || 0).toFixed(2)}<br/>
-      <strong>Balance Due:</strong> $${Number(invoice.balanceDue || 0).toFixed(2)}</p>
-
-      ${invoice.notes ? `<p><strong>Notes:</strong> ${invoice.notes}</p>` : ""}
-      ${invoice.extraNotes ? `<p><strong>Extra Notes:</strong> ${invoice.extraNotes}</p>` : ""}
-      ${invoice.termsAndConditions ? `<p><strong>Terms & Conditions:</strong> ${invoice.termsAndConditions}</p>` : ""}
-      ${invoice.additionalMessages ? `<p><strong>Additional Messages:</strong> ${invoice.additionalMessages}</p>` : ""}
     </div>
   `;
 
   const adminHtml = `
-    <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;color:#1f2937;">
-      <h2 style="margin-bottom:8px;">Invoice Generated: ${invoice.invoiceNumber}</h2>
-      <p style="margin-top:0;">This invoice has been generated and is attached as a PDF.</p>
-      <p><strong>Customer:</strong> ${customer?.name || "N/A"}<br/>
-      <strong>Customer Email:</strong> ${customerEmail || "N/A"}<br/>
-      <strong>Total:</strong> $${Number(invoice.total || 0).toFixed(2)}<br/>
-      <strong>Payment Status:</strong> ${paymentStatusLabel(invoice.paymentStatus)}</p>
-      ${html}
+    <div style="background:#f3f6fb;padding:24px 12px;font-family:Arial,sans-serif;color:#1f2937;">
+      <div style="max-width:760px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ef;border-radius:14px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
+        <div style="background:linear-gradient(120deg,#111827,#1f2937);padding:20px 24px;color:#fff;">
+          <div style="font-size:12px;opacity:0.9;letter-spacing:0.4px;">INVOICE GENERATED</div>
+          <h2 style="margin:8px 0 2px 0;font-size:25px;">${invoice.invoiceNumber}</h2>
+          <div style="font-size:14px;opacity:0.9;">PDF attached. Customer and sales copies are being delivered.</div>
+        </div>
+
+        <div style="padding:18px 22px;">
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:12px;line-height:1.55;">
+            <div><strong>Customer:</strong> ${customer?.name || "N/A"}</div>
+            <div><strong>Customer Email:</strong> ${customerEmail || "N/A"}</div>
+            <div><strong>Total:</strong> $${Number(invoice.total || 0).toFixed(2)}</div>
+            <div><strong>Payment Status:</strong> ${paymentStatusLabel(invoice.paymentStatus)}</div>
+          </div>
+          ${html}
+        </div>
+      </div>
     </div>
   `;
 

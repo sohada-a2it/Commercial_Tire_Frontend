@@ -191,16 +191,19 @@ const validateCustomerSnapshot = (snapshot) => {
 const createTransporter = () => {
   const user = String(process.env.SMTP_USER || process.env.OWNER_EMAIL || "").trim();
   const pass = String(process.env.SMTP_PASSWORD || "").replace(/\s+/g, "");
-  const rawHost = String(process.env.SMTP_HOST || "").trim();
+  const rawHost = String(process.env.SMTP_HOST || "").trim().toLowerCase();
+  const domain = user.split("@")[1]?.toLowerCase() || "";
   let host = rawHost;
 
-  if (!host || host.includes("@")) {
-    const domain = user.split("@")[1]?.toLowerCase();
-    if (domain === "gmail.com") host = "smtp.gmail.com";
-    else if (domain === "outlook.com" || domain === "hotmail.com" || domain === "live.com") {
-      host = "smtp.office365.com";
-    } else {
-      host = "smtp.hostinger.com";
+  if (domain === "gmail.com") host = "smtp.gmail.com";
+  else if (domain === "outlook.com" || domain === "hotmail.com" || domain === "live.com") {
+    host = "smtp.office365.com";
+  } else if (!host || host.includes("@")) {
+    host = "smtp.hostinger.com";
+  } else {
+    const looksLikePlainDomain = host.includes(".") && !host.startsWith("smtp.") && !host.startsWith("mail.");
+    if (looksLikePlainDomain) {
+      host = host === "asianimportexport.com" || domain === "asianimportexport.com" ? "smtp.hostinger.com" : `smtp.${host}`;
     }
   }
 

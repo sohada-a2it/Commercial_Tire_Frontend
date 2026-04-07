@@ -206,6 +206,38 @@ const normalizeProductPayload = (payload = {}) => {
   };
 };
 
+const resolveExistingProductForImport = async (productPayload) => {
+  const slug = String(productPayload.slug || "").trim();
+  const sourceId = productPayload.sourceId;
+
+  if (slug) {
+    const existingBySlug = await Product.findOne({ slug });
+    if (existingBySlug) {
+      if (
+        sourceId !== undefined
+        && existingBySlug.sourceId !== undefined
+        && Number(existingBySlug.sourceId) !== Number(sourceId)
+      ) {
+        delete productPayload.sourceId;
+      }
+      return existingBySlug;
+    }
+  }
+
+  if (sourceId !== undefined) {
+    const existingBySource = await Product.findOne({ sourceId });
+    if (existingBySource) {
+      if (slug && existingBySource.slug && existingBySource.slug !== slug) {
+        delete productPayload.sourceId;
+        return null;
+      }
+      return existingBySource;
+    }
+  }
+
+  return null;
+};
+
 const normalizeSubcategories = (subcategories) => {
   // Handle null, undefined, or non-array values
   if (!subcategories) {
@@ -912,7 +944,7 @@ const importCatalogFromJson = async (_req, res) => {
             )
           );
 
-          const existingProduct = await Product.findOne({ sourceId: sourceProduct.id });
+          const existingProduct = await resolveExistingProductForImport(productPayload);
           let product;
           if (existingProduct) {
             Object.assign(existingProduct, productPayload);
@@ -987,7 +1019,7 @@ const importCatalogFromJson = async (_req, res) => {
           productPayload.subcategorySlug = subcategory?.slug || productPayload.subcategorySlug || slugifyText(productPayload.subcategoryName);
         }
 
-        const existingProduct = await Product.findOne({ sourceId: sourceProduct.id });
+        const existingProduct = await resolveExistingProductForImport(productPayload);
         let product;
         if (existingProduct) {
           Object.assign(existingProduct, productPayload);

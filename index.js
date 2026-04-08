@@ -23,13 +23,13 @@ const resolveSmtpHost = (rawHost, userEmail) => {
     return "smtp.office365.com";
   }
 
-  if (!host || host.includes("@")) return "smtp.hostinger.com";
+  if (!host || host.includes("@")) return "";
 
   // If only the website domain is given (e.g. asianimportexport.com), convert to a usable SMTP host.
   const looksLikePlainDomain = host.includes(".") && !host.startsWith("smtp.") && !host.startsWith("mail.");
   if (looksLikePlainDomain) {
     if (host === "asianimportexport.com" || domain === "asianimportexport.com") {
-      return "smtp.hostinger.com";
+      return "mail.asianimportexport.com";
     }
     return `smtp.${host}`;
   }
@@ -39,20 +39,27 @@ const resolveSmtpHost = (rawHost, userEmail) => {
 
 const createMailTransporter = () => {
   const user = String(process.env.SMTP_USER || process.env.OWNER_EMAIL || "").trim();
-  const pass = String(process.env.SMTP_PASSWORD || "").replace(/\s+/g, "");
+  const rawPassword = String(process.env.SMTP_PASSWORD || "");
+  let pass = rawPassword.trim();
   const host = resolveSmtpHost(process.env.SMTP_HOST, user);
   const port = Number(process.env.SMTP_PORT || 465);
+  const domain = user.split("@")[1]?.toLowerCase() || "";
+  const secure = port === 465;
+  const relaxTlsForHost = host === "mail.asianimportexport.com";
 
-  if (!user || !pass) return null;
+  // Gmail app passwords are often copied with spaces; other providers may require spaces.
+  if (domain === "gmail.com") {
+    pass = pass.replace(/\s+/g, "");
+  }
+
+  if (!user || !pass || !host) return null;
 
   return nodemailer.createTransport({
     host,
     port,
-    secure: true,
+    secure,
     auth: { user, pass },
-    tls: {
-      rejectUnauthorized: false,
-    },
+    tls: relaxTlsForHost ? { rejectUnauthorized: false } : undefined,
   });
 };
 
@@ -342,7 +349,7 @@ app.post("/api/send-invoice", async (req, res) => {
             </tr>
             <tr>
               <td style="padding: 5px 0; vertical-align: top;"><strong>Address:</strong></td>
-              <td style="padding: 5px 0;">${customer.address}<br>${customer.city}, ${customer.state} ${customer.zipCode}</td>
+              <td style="padding: 5px 0;">${customer.address}<br>${[customer.city, customer.zone, customer.area, customer.zipCode].filter(Boolean).join(", ")}</td>
             </tr>
             ${customer.notes ? `
             <tr>
@@ -435,7 +442,7 @@ app.post("/api/send-invoice", async (req, res) => {
             </tr>
             <tr>
               <td style="padding: 5px 0; vertical-align: top;"><strong>Shipping Address:</strong></td>
-              <td style="padding: 5px 0;">${customer.address}<br>${customer.city}, ${customer.state} ${customer.zipCode}</td>
+              <td style="padding: 5px 0;">${customer.address}<br>${[customer.city, customer.zone, customer.area, customer.zipCode].filter(Boolean).join(", ")}</td>
             </tr>
             ${customer.notes ? `
             <tr>

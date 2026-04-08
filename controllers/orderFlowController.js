@@ -155,7 +155,11 @@ const normalizeCustomerSnapshot = ({ customer = {}, authUser = null, fallback = 
     ),
     address: sanitizeText(source.address, sanitizeText(fallbackSource.address, "")),
     city: sanitizeText(source.city, sanitizeText(fallbackSource.city, "")),
-    state: sanitizeText(source.state, sanitizeText(fallbackSource.state, "")),
+    zone: sanitizeText(
+      source.zone,
+      sanitizeText(fallbackSource.zone, sanitizeText(source.state, sanitizeText(fallbackSource.state, "")))
+    ),
+    area: sanitizeText(source.area, sanitizeText(fallbackSource.area, "")),
     zipCode: sanitizeText(source.zipCode, sanitizeText(fallbackSource.zipCode, "")),
     notes: sanitizeText(source.notes, sanitizeText(fallbackSource.notes, "")),
     whatsappNumber: sanitizeText(
@@ -168,18 +172,20 @@ const normalizeCustomerSnapshot = ({ customer = {}, authUser = null, fallback = 
   return normalized;
 };
 
-const requiredCustomerFields = [
+const inquiryRequiredCustomerFields = [
   "name",
   "email",
   "phone",
   "address",
   "city",
-  "state",
-  "zipCode",
+  "zone",
+  "area",
 ];
 
-const validateCustomerSnapshot = (snapshot) => {
-  for (const field of requiredCustomerFields) {
+const invoiceRequiredCustomerFields = [...inquiryRequiredCustomerFields, "zipCode"];
+
+const validateCustomerSnapshot = (snapshot, requiredFields = inquiryRequiredCustomerFields) => {
+  for (const field of requiredFields) {
     if (!snapshot?.[field] || !String(snapshot[field]).trim()) {
       return field;
     }
@@ -188,39 +194,57 @@ const validateCustomerSnapshot = (snapshot) => {
   return null;
 };
 
+const toEmailDeliveryErrorMessage = (error, fallbackMessage) => {
+  if (error?.code === "EAUTH" || error?.responseCode === 535) {
+    return "SMTP authentication failed. Verify SMTP_HOST, SMTP_PORT, SMTP_USER and SMTP_PASSWORD. If using Gmail, use an App Password.";
+  }
+
+  return error?.message || fallbackMessage;
+};
+
 const createTransporter = () => {
   const user = String(process.env.SMTP_USER || process.env.OWNER_EMAIL || "").trim();
-  const pass = String(process.env.SMTP_PASSWORD || "").replace(/\s+/g, "");
+  const rawPassword = String(process.env.SMTP_PASSWORD || "");
+  let pass = rawPassword.trim();
   const rawHost = String(process.env.SMTP_HOST || "").trim().toLowerCase();
   const domain = user.split("@")[1]?.toLowerCase() || "";
   let host = rawHost;
+
+  // Gmail app passwords are often copied with spaces; other providers may require spaces.
+  if (domain === "gmail.com") {
+    pass = pass.replace(/\s+/g, "");
+  }
 
   if (domain === "gmail.com") host = "smtp.gmail.com";
   else if (domain === "outlook.com" || domain === "hotmail.com" || domain === "live.com") {
     host = "smtp.office365.com";
   } else if (!host || host.includes("@")) {
-    host = "smtp.hostinger.com";
+    host = "";
   } else {
     const looksLikePlainDomain = host.includes(".") && !host.startsWith("smtp.") && !host.startsWith("mail.");
     if (looksLikePlainDomain) {
-      host = host === "asianimportexport.com" || domain === "asianimportexport.com" ? "smtp.hostinger.com" : `smtp.${host}`;
+      if (host === "asianimportexport.com" || domain === "asianimportexport.com") {
+          host = "mail.asianimportexport.com";
+      } else {
+          host = `smtp.${host}`;
+      }
     }
   }
 
   const port = Number(process.env.SMTP_PORT || 465);
+  const secure = port === 465;
+  const relaxTlsForHost = host === "mail.asianimportexport.com";
 
-  if (!user || !pass) {
+  if (!user || !pass || !host) {
     return null;
   }
 
   return nodemailer.createTransport({
     host,
     port,
-    secure: true,
+    secure,
     auth: { user, pass },
-    tls: {
-      rejectUnauthorized: false,
-    },
+    tls: relaxTlsForHost ? { rejectUnauthorized: false } : undefined,
   });
 };
 
@@ -289,8 +313,8 @@ const generateInvoicePdfBuffer = (invoice) =>
     if (logoPath) {
       doc.save();
       try {
-        doc.fillOpacity(0.08);
-        doc.image(logoPath, pageWidth / 2 - 155, pageHeight / 2 - 155, { width: 310 });
+        doc.fillOpacity(0.11);
+        doc.image(logoPath, pageWidth / 2 - 185, pageHeight / 2 - 235, { width: 350 });
       } catch (logoError) {
         // Some PDFKit builds cannot decode webp; skip watermark instead of failing invoice download.
       } finally {
@@ -394,7 +418,9 @@ const generateInvoicePdfBuffer = (invoice) =>
 
     const customer = invoice.customerSnapshot || {};
     const customerName = customer.companyName || customer.name || "";
-    const customerAddress = [customer.address, customer.city, customer.state, customer.zipCode].filter(Boolean).join(", ");
+    const customerAddress = [customer.address, customer.city, customer.zone, customer.area, customer.zipCode]
+      .filter(Boolean)
+      .join(", ");
 
     const drawDualRow = (leftLabel, leftValue, rightLabel, rightValue, height = 30) => {
       const half = tableWidth / 2;
@@ -591,7 +617,7 @@ const sendInquiryReceivedEmails = async (inquiry) => {
             <div><strong>Customer:</strong> ${customer.name || "N/A"}</div>
             <div><strong>Login/Register Email:</strong> ${customerEmail || "N/A"}</div>
             <div><strong>Phone:</strong> ${customer.phone || "N/A"}</div>
-            <div><strong>Address:</strong> ${[customer.address, customer.city, customer.state, customer.zipCode].filter(Boolean).join(", ") || "N/A"}</div>
+            <div><strong>Address:</strong> ${[customer.address, customer.city, customer.zone, customer.area, customer.zipCode].filter(Boolean).join(", ") || "N/A"}</div>
             ${customer.notes ? `<div><strong>Notes:</strong> ${customer.notes}</div>` : ""}
           </div>
 
@@ -860,7 +886,7 @@ const placeOrderInquiry = async (req, res) => {
     if (accountEmail) {
       customerSnapshot.email = accountEmail;
     }
-    const missingField = validateCustomerSnapshot(customerSnapshot);
+    const missingField = validateCustomerSnapshot(customerSnapshot, inquiryRequiredCustomerFields);
 
     if (missingField) {
       return res.status(400).json({
@@ -893,7 +919,7 @@ const placeOrderInquiry = async (req, res) => {
     } catch (emailError) {
       emailDelivery = {
         sent: false,
-        message: emailError.message || "Failed to send inquiry email",
+        message: toEmailDeliveryErrorMessage(emailError, "Failed to send inquiry email"),
       };
       console.error("Inquiry email send error:", emailError);
     }
@@ -1125,7 +1151,7 @@ const createInvoiceFromInquiry = async (req, res) => {
     // Always keep invoice email aligned with login/register account email.
     customerSnapshot.email = accountEmail;
 
-    const missingCustomerField = validateCustomerSnapshot(customerSnapshot);
+    const missingCustomerField = validateCustomerSnapshot(customerSnapshot, invoiceRequiredCustomerFields);
     if (missingCustomerField) {
       await session.abortTransaction();
       session.endSession();
@@ -1200,7 +1226,7 @@ const createInvoiceFromInquiry = async (req, res) => {
     } catch (emailError) {
       emailDelivery = {
         sent: false,
-        message: emailError.message || "Failed to send invoice email",
+        message: toEmailDeliveryErrorMessage(emailError, "Failed to send invoice email"),
       };
       console.error("Invoice email send error:", emailError);
     }

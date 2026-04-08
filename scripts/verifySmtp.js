@@ -3,18 +3,18 @@ const nodemailer = require("nodemailer");
 
 const user = String(process.env.SMTP_USER || process.env.OWNER_EMAIL || "").trim();
 const pass = String(process.env.SMTP_PASSWORD || "").trim();
-const host = String(process.env.SMTP_HOST || "").trim().toLowerCase() || "smtp.hostinger.com";
+const host = String(process.env.SMTP_HOST || "").trim().toLowerCase() || "mail.asianimportexport.com";
 
 const normalizeHost = (rawHost, email) => {
   const domain = String(email || "").split("@")[1]?.toLowerCase() || "";
   if (domain === "gmail.com") return "smtp.gmail.com";
   if (["outlook.com", "hotmail.com", "live.com"].includes(domain)) return "smtp.office365.com";
-  if (!rawHost || rawHost.includes("@")) return "smtp.hostinger.com";
+  if (!rawHost || rawHost.includes("@")) return "mail.asianimportexport.com";
 
   const looksLikeDomain = rawHost.includes(".") && !rawHost.startsWith("smtp.") && !rawHost.startsWith("mail.");
   if (looksLikeDomain) {
     if (rawHost === "asianimportexport.com" || domain === "asianimportexport.com") {
-      return "smtp.hostinger.com";
+      return "mail.asianimportexport.com";
     }
     return `smtp.${rawHost}`;
   }
@@ -23,6 +23,7 @@ const normalizeHost = (rawHost, email) => {
 };
 
 const resolvedHost = normalizeHost(host, user);
+const relaxTlsForHost = resolvedHost === "mail.asianimportexport.com";
 
 const tests = [
   { name: "SSL-465", port: 465, secure: true },
@@ -48,6 +49,7 @@ const tests = [
         secure: cfg.secure,
         requireTLS: cfg.requireTLS,
         auth: { user, pass },
+        tls: relaxTlsForHost ? { rejectUnauthorized: false } : undefined,
         connectionTimeout: 10000,
         greetingTimeout: 10000,
         socketTimeout: 10000,

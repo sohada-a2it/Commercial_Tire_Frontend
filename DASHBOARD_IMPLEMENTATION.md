@@ -7,7 +7,7 @@
 Added new fields to the User schema:
 - **`role`**: String enum (`"user"` or `"admin"`) - Default: `"user"`
   - Controls access to admin features like viewing all users
-- **`businessType`**: String enum (`"Wholesaler"`, `"Retailer"`, or `"Other"`)
+- **`businessType`**: String value. Predefined business types are supported, and custom values entered via `Other` are stored as-is.
   - Categorizes users by their business type
 
 ### 2. New API Endpoint - Get All Users

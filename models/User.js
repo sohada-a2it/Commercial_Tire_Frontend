@@ -41,12 +41,11 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["customer", "admin", "moderator", "user"],
-      default: "customer",
+      enum: ["wholesaler","distributor","manufacturer","supplier","exporter / importer","service provider","trading business"],
+      default: "wholesaler",
     },
     businessType: {
       type: String,
-      enum: ["Wholeseller", "Wholesaler", "Retailer", "REGULAR USER", "Other"],
       trim: true,
     },
     address: {

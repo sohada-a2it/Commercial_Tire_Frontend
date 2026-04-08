@@ -4,18 +4,14 @@ const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 
-const ALLOWED_BUSINESS_TYPES = [
-  "Wholeseller",
-  "Wholesaler",
-  "Retailer",
-  "REGULAR USER",
-  "Other",
-];
-
 const ALLOWED_AUTHORIZED_ROLES = ["admin", "moderator"];
 
 const normalizeRole = (role) => (role === "user" ? "customer" : role);
 const normalizeOptionalText = (value) => (value === undefined || value === null ? undefined : String(value).trim());
+const resolveBusinessType = (value, fallback = "Other") => {
+  const normalizedValue = normalizeOptionalText(value);
+  return normalizedValue || fallback;
+};
 
 const mapUserPayload = (user) => ({
   id: user._id,
@@ -85,13 +81,6 @@ const registerUser = async (req, res) => {
     } = req.body;
     const normalizedEmail = email?.toLowerCase().trim();
 
-    if (businessType && !ALLOWED_BUSINESS_TYPES.includes(businessType)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid business type",
-      });
-    }
-
     // Validate required fields
     if (!firebaseUid || !normalizedEmail || !fullName) {
       return res.status(400).json({
@@ -110,7 +99,7 @@ const registerUser = async (req, res) => {
       user.whatsappNumber = whatsappNumber || user.whatsappNumber;
       user.country = country || user.country;
       user.photoURL = photoURL || user.photoURL;
-      user.businessType = businessType || user.businessType;
+      user.businessType = resolveBusinessType(businessType, user.businessType || "Other");
       if (provider) user.provider = provider;
       user.role = normalizeRole(user.role);
 
@@ -142,7 +131,7 @@ const registerUser = async (req, res) => {
       country,
       provider: provider || "email",
       photoURL,
-      businessType: businessType || "Other",
+      businessType: resolveBusinessType(businessType),
       role: "customer",
     });
 
@@ -222,13 +211,6 @@ const updateUserProfile = async (req, res) => {
     const { firebaseUid } = req.params;
     const { companyName, fullName, whatsappNumber, country, photoURL, businessType, address } = req.body;
 
-    if (businessType && !ALLOWED_BUSINESS_TYPES.includes(businessType)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid business type",
-      });
-    }
-
     if (!firebaseUid) {
       return res.status(400).json({
         success: false,
@@ -282,7 +264,7 @@ const updateUserProfile = async (req, res) => {
       const normalizedWhatsapp = normalizeOptionalText(whatsappNumber);
       const normalizedCountry = normalizeOptionalText(country);
       const normalizedPhotoURL = normalizeOptionalText(photoURL);
-      const normalizedBusinessType = normalizeOptionalText(businessType);
+      const normalizedBusinessType = businessType === undefined ? undefined : resolveBusinessType(businessType, user.businessType || "Other");
 
       if (normalizedCompanyName !== undefined) user.companyName = normalizedCompanyName;
       if (normalizedFullName !== undefined) user.fullName = normalizedFullName;

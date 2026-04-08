@@ -87,7 +87,7 @@ Fields:
 - provider: enum(email, google), default email
 - photoURL: string
 - role: enum(customer, admin, moderator, user), current customer flows store customer/user
-- businessType: enum(Wholeseller, Wholesaler, Retailer, REGULAR USER, Other)
+- businessType: string (predefined values are supported, custom values are also allowed)
 - createdAt, updatedAt
 
 ### 5.2 Authorized Person

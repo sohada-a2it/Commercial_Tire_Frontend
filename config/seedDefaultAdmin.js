@@ -44,9 +44,12 @@ const createDefaultAdminWithWebApi = async ({ email, password, displayName }) =>
 
   const firebaseMessage = data?.error?.message;
   if (firebaseMessage === "EMAIL_EXISTS") {
-    throw new Error(
-      `Default admin already exists in Firebase Auth (${email}). Login with existing password or reset it from Firebase Console.`
-    );
+    return {
+      uid: undefined,
+      displayName,
+      email,
+      alreadyExists: true,
+    };
   }
 
   throw new Error(`Fallback Firebase signUp failed: ${firebaseMessage || "Unknown error"}`);
@@ -129,7 +132,13 @@ const seedDefaultAdmin = async () => {
           password: defaultAdminPassword,
           displayName: defaultAdminName,
         });
-        console.log(`Created Firebase default admin via Web API: ${defaultAdminEmail}`);
+        if (firebaseUser.alreadyExists) {
+          console.log(
+            `Default admin already exists in Firebase Auth: ${defaultAdminEmail}. Reusing the account for the authorized admin record.`
+          );
+        } else {
+          console.log(`Created Firebase default admin via Web API: ${defaultAdminEmail}`);
+        }
       } catch (error) {
         const legacyUser = await User.findOne({ email: defaultAdminEmail });
 

@@ -41,8 +41,8 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["wholesaler","distributor","manufacturer","supplier","exporter / importer","service provider","trading business"],
-      default: "wholesaler",
+      enum: ["customer", "user", "wholesaler", "distributor", "manufacturer", "supplier", "exporter / importer", "service provider", "trading business"],
+      default: "customer",
     },
     businessType: {
       type: String,

@@ -182,7 +182,7 @@ const inquiryRequiredCustomerFields = [
   "area",
 ];
 
-const invoiceRequiredCustomerFields = [...inquiryRequiredCustomerFields, "zipCode"];
+const invoiceRequiredCustomerFields = [...inquiryRequiredCustomerFields];
 
 const validateCustomerSnapshot = (snapshot, requiredFields = inquiryRequiredCustomerFields) => {
   for (const field of requiredFields) {
@@ -286,8 +286,77 @@ const getLogoPath = () => {
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 };
 
-const generateInvoicePdfBuffer = (invoice) =>
-  new Promise((resolve, reject) => {
+let cachedInvoiceLogoSource;
+let cachedInvoiceLogoLoaded = false;
+
+const sanitizeBaseUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
+
+const getInvoiceLogoUrlCandidates = () => {
+  const explicit = [
+    process.env.INVOICE_LOGO_URL,
+    process.env.PDF_LOGO_URL,
+    process.env.LOGO_URL,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  const frontendBase = sanitizeBaseUrl(process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.WEBSITE_URL);
+  if (!frontendBase) {
+    return explicit;
+  }
+
+  return [
+    ...explicit,
+    `${frontendBase}/logo.png`,
+    `${frontendBase}/logo.webp`,
+    `${frontendBase}/assets/logo.png`,
+    `${frontendBase}/assets/logo.webp`,
+  ];
+};
+
+const getInvoiceLogoSource = async () => {
+  if (cachedInvoiceLogoLoaded) {
+    return cachedInvoiceLogoSource;
+  }
+
+  const localLogoPath = getLogoPath();
+  if (localLogoPath) {
+    cachedInvoiceLogoSource = localLogoPath;
+    cachedInvoiceLogoLoaded = true;
+    return cachedInvoiceLogoSource;
+  }
+
+  const urls = getInvoiceLogoUrlCandidates();
+  for (const url of urls) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        continue;
+      }
+
+      const bytes = await response.arrayBuffer();
+      const buffer = Buffer.from(bytes);
+      if (!buffer.length) {
+        continue;
+      }
+
+      cachedInvoiceLogoSource = buffer;
+      cachedInvoiceLogoLoaded = true;
+      return cachedInvoiceLogoSource;
+    } catch {
+      // Try the next URL candidate.
+    }
+  }
+
+  cachedInvoiceLogoSource = null;
+  cachedInvoiceLogoLoaded = true;
+  return null;
+};
+
+const generateInvoicePdfBuffer = async (invoice) => {
+  const logoSource = await getInvoiceLogoSource();
+
+  return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: "A4", margin: 42 });
     const chunks = [];
 
@@ -309,12 +378,11 @@ const generateInvoicePdfBuffer = (invoice) =>
     const incoterms = getLineValue(invoice.additionalMessages, "Incoterms") || "";
     const bankDetails = getLineValue(invoice.termsAndConditions, "Bank Details") || "";
 
-    const logoPath = getLogoPath();
-    if (logoPath) {
+    if (logoSource) {
       doc.save();
       try {
         doc.fillOpacity(0.11);
-        doc.image(logoPath, pageWidth / 2 - 185, pageHeight / 2 - 235, { width: 350 });
+        doc.image(logoSource, pageWidth / 2 - 185, pageHeight / 2 - 235, { width: 350 });
       } catch (logoError) {
         // Some PDFKit builds cannot decode webp; skip watermark instead of failing invoice download.
       } finally {
@@ -540,6 +608,7 @@ const generateInvoicePdfBuffer = (invoice) =>
 
     doc.end();
   });
+};
 
 const sendInquiryReceivedEmails = async (inquiry) => {
   const transporter = createTransporter();

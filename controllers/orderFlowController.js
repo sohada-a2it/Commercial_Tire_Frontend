@@ -260,7 +260,7 @@ const COMPANY_INFO = {
     "63/16 Soi Chumchon Talat Tha Ruea Khlong Toei Khwaeng Khlong Toei, Khet Khlong Toei Krung Thep Maha Nakhon 10110, Thailand",
 };
 
-const SALES_EMAIL = process.env.SALES_EMAIL || "sale@asianimportexport.com";
+const SALES_EMAIL = process.env.SMTP_USER || process.env.SALES_EMAIL || "sale@asianimportexport.com";
 
 const getLineValue = (text, label) => {
   if (!text) return "";

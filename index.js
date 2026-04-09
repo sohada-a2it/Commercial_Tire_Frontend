@@ -13,7 +13,7 @@ const categoryRoutes = require("./routes/categoryRoutes");
 const app = express();
 
 const GENERAL_CONTACT_EMAIL = process.env.GENERAL_CONTACT_EMAIL || "info@asianimportexport.com";
-const SALES_EMAIL = process.env.SALES_EMAIL || "sale@asianimportexport.com";
+const SALES_EMAIL = process.env.SMTP_USER || process.env.SALES_EMAIL || "sale@asianimportexport.com";
 
 const resolveSmtpHost = (rawHost, userEmail) => {
   const host = String(rawHost || "").trim().toLowerCase();

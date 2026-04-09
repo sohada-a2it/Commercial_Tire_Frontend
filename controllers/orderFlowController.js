@@ -507,8 +507,8 @@ const generateInvoicePdfBuffer = async (invoice) => {
     drawDualRow("Mobile:", customer.whatsappNumber || customer.phone || "", "Mobile:", COMPANY_INFO.mobile);
     drawDualRow("Address:", customerAddress, "Address:", COMPANY_INFO.address, 44);
 
-    drawCell(tableX, y, tableWidth * 0.3, 30, "", "Payment Terms:", { bg: "#edf2e5", valueSize: 9 });
-    drawCell(tableX + tableWidth * 0.3, y, tableWidth * 0.7, 30, "", paymentTerms, { bg: "#edf2e5", valueSize: 9 });
+    drawCell(tableX, y, tableWidth * 0.3, 30, "", "Payment Terms:", { bg: "#edf2e5", valueSize: 9, valueColor: "#000000" });
+    drawCell(tableX + tableWidth * 0.3, y, tableWidth * 0.7, 30, "", "* " + paymentTerms, { bg: "#edf2e5", valueSize: 10,valueColor: "#006312",});
     y += 30;
 
     drawDualRow("Production Time:", productionTime, "", "", 28);

@@ -160,7 +160,10 @@ const normalizeCustomerSnapshot = ({ customer = {}, authUser = null, fallback = 
       source.zone,
       sanitizeText(fallbackSource.zone, sanitizeText(source.state, sanitizeText(fallbackSource.state, "")))
     ),
-    zipCode: sanitizeText(source.zipCode, sanitizeText(fallbackSource.zipCode, "")),
+    zipCode: sanitizeText(
+      source.zipCode || source.postalCode,
+      sanitizeText(fallbackSource.zipCode || fallbackSource.postalCode, "")
+    ),
     notes: sanitizeText(source.notes, sanitizeText(fallbackSource.notes, "")),
     whatsappNumber: sanitizeText(
       source.whatsappNumber,
@@ -276,10 +279,10 @@ const toDateLabel = (value, fallbackDate = new Date()) => {
 
 const getLogoPath = () => {
   const candidates = [
-    path.resolve(__dirname, "../../Asian.Import.Export.Co.Frontend/public/logo.png"),
     path.resolve(__dirname, "../public/logo.png"),
-    path.resolve(__dirname, "../../Asian.Import.Export.Co.Frontend/public/logo.webp"),
     path.resolve(__dirname, "../public/logo.webp"),
+    path.resolve(__dirname, "../../Asian.Import.Export.Co.Frontend/public/logo.png"),
+    path.resolve(__dirname, "../../Asian.Import.Export.Co.Frontend/public/logo.webp"),
   ];
 
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
@@ -342,7 +345,8 @@ const getInvoiceLogoSource = async () => {
       cachedInvoiceLogoSource = buffer;
       cachedInvoiceLogoLoaded = true;
       return cachedInvoiceLogoSource;
-    } catch {
+    } catch (fetchError) {
+      console.error("Invoice logo fetch failed:", fetchError);
       // Try the next URL candidate.
     }
   }
@@ -377,13 +381,27 @@ const generateInvoicePdfBuffer = async (invoice) => {
     const incoterms = getLineValue(invoice.additionalMessages, "Incoterms") || "";
     const bankDetails = getLineValue(invoice.termsAndConditions, "Bank Details") || "";
 
-    if (logoSource) {
+    let y = margin;
+    const logoPath = typeof logoSource === "string" && fs.existsSync(logoSource) ? logoSource : null;
+    const logoBuffer = logoPath ? null : logoSource;
+
+    if (logoPath || logoBuffer) {
       doc.save();
       try {
-        doc.fillOpacity(0.11);
-        doc.image(logoSource, pageWidth / 2 - 185, pageHeight / 2 - 235, { width: 350 });
+        doc.opacity(0.09);
+        const watermarkWidth = Math.min(400, pageWidth - margin * 2);
+        doc.image(
+          logoPath || logoBuffer,
+          pageWidth / 2 - watermarkWidth / 2,
+          pageHeight / 2 - watermarkWidth / 2 - 60,
+          {
+            fit: [watermarkWidth, watermarkWidth],
+            align: "center",
+            valign: "center",
+          }
+        );
       } catch (logoError) {
-        // Some PDFKit builds cannot decode webp; skip watermark instead of failing invoice download.
+        console.error("PDF logo render failed:", logoError);
       } finally {
         doc.restore();
       }
@@ -444,15 +462,15 @@ const generateInvoicePdfBuffer = async (invoice) => {
       }
     };
 
-    let y = margin;
     doc.rect(tableX, y, tableWidth, pageHeight - margin * 2).stroke();
 
-    drawCell(tableX, y, tableWidth, 44, "", "");
-    doc.font("Helvetica-Bold").fontSize(18).text("ASIAN IMPORT EXPORT CO., LTD", tableX, y + 8, {
+    const headerRowHeight = 44;
+    drawCell(tableX, y, tableWidth, headerRowHeight, "", "");
+    doc.font("Helvetica-Bold").fontSize(18).text("ASIAN IMPORT EXPORT CO., LTD", tableX, y + 12, {
       width: tableWidth,
       align: "center",
     });
-    y += 44;
+    y += headerRowHeight;
 
     drawCell(tableX, y, tableWidth, 32, "", "");
     doc.font("Helvetica-Bold").fontSize(14).text("Proforma Invoice", tableX, y + 8, {

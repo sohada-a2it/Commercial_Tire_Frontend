@@ -680,6 +680,22 @@ const sendInquiryReceivedEmails = async (inquiry) => {
             </thead>
             <tbody>${itemRows}</tbody>
           </table>
+          
+
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:14px;line-height:1.6;">
+            <div><strong>Buyer Details</strong></div>
+            <div><strong>Name:</strong> ${customer.name || "N/A"}</div>
+            <div><strong>Company:</strong> ${customer.companyName || "N/A"}</div>
+            <div><strong>Email:</strong> ${customer.email || "N/A"}</div>
+            <div><strong>Phone:</strong> ${customer.phone || "N/A"}</div>
+            <div><strong>Address:</strong> ${[customer.address, customer.city, customer.state || customer.zone, customer.zipCode]
+              .filter(Boolean)
+              .join(", ") || "N/A"}</div>
+          </div>
+
+          ${customer.notes ? `<div style="background:#fff7ed;border:1px solid #fde3c7;border-radius:10px;padding:14px 16px;margin-bottom:14px;line-height:1.6;"><strong>Message:</strong><div>${customer.notes}</div></div>` : ""}
+
+          
 
           <p style="margin:14px 0 0 0;font-size:14px;color:#475569;">
             Thank you for choosing Asian Import Export Co. We will send your invoice very shortly.

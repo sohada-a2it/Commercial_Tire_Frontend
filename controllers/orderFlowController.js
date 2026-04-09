@@ -155,6 +155,7 @@ const normalizeCustomerSnapshot = ({ customer = {}, authUser = null, fallback = 
     ),
     address: sanitizeText(source.address, sanitizeText(fallbackSource.address, "")),
     city: sanitizeText(source.city, sanitizeText(fallbackSource.city, "")),
+    state: sanitizeText(source.state, sanitizeText(fallbackSource.state, "")),
     zone: sanitizeText(
       source.zone,
       sanitizeText(fallbackSource.zone, sanitizeText(source.state, sanitizeText(fallbackSource.state, "")))

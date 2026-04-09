@@ -91,6 +91,7 @@ const invoiceSchema = new mongoose.Schema(
       companyName: { type: String, trim: true },
       address: { type: String, trim: true },
       city: { type: String, trim: true },
+      state: { type: String, trim: true },
       zone: { type: String, trim: true },
       area: { type: String, trim: true },
       zipCode: { type: String, trim: true },

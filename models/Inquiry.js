@@ -64,6 +64,7 @@ const inquirySchema = new mongoose.Schema(
       companyName: { type: String, trim: true },
       address: { type: String, required: true, trim: true },
       city: { type: String, required: true, trim: true },
+      state: { type: String, trim: true },
       zone: { type: String, required: true, trim: true },
       area: { type: String, required: true, trim: true },
       zipCode: { type: String, trim: true },

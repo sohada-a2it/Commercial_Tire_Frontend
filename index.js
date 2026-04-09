@@ -6,6 +6,7 @@ const connectDB = require("./config/db");
 const seedDefaultAdmin = require("./config/seedDefaultAdmin");
 const userRoutes = require("./routes/userRoutes");
 const orderFlowRoutes = require("./routes/orderFlowRoutes");
+const addressRoutes = require("./routes/addressRoutes");
 const catalogRoutes = require("./routes/catalogRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
 
@@ -81,6 +82,7 @@ app.use(express.json());
 // User routes
 app.use("/api/users", userRoutes);
 app.use("/api", orderFlowRoutes);
+app.use("/api/addresses", addressRoutes);
 app.use("/api/catalog", catalogRoutes);
 app.use("/api/categories", categoryRoutes);
 

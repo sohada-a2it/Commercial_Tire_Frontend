@@ -160,7 +160,6 @@ const normalizeCustomerSnapshot = ({ customer = {}, authUser = null, fallback = 
       source.zone,
       sanitizeText(fallbackSource.zone, sanitizeText(source.state, sanitizeText(fallbackSource.state, "")))
     ),
-    area: sanitizeText(source.area, sanitizeText(fallbackSource.area, "")),
     zipCode: sanitizeText(source.zipCode, sanitizeText(fallbackSource.zipCode, "")),
     notes: sanitizeText(source.notes, sanitizeText(fallbackSource.notes, "")),
     whatsappNumber: sanitizeText(
@@ -180,7 +179,6 @@ const inquiryRequiredCustomerFields = [
   "address",
   "city",
   "zone",
-  "area",
 ];
 
 const invoiceRequiredCustomerFields = [...inquiryRequiredCustomerFields];
@@ -487,7 +485,7 @@ const generateInvoicePdfBuffer = async (invoice) => {
 
     const customer = invoice.customerSnapshot || {};
     const customerName = customer.companyName || customer.name || "";
-    const customerAddress = [customer.address, customer.city, customer.zone, customer.area, customer.zipCode]
+    const customerAddress = [customer.address, customer.city, customer.zone, customer.zipCode]
       .filter(Boolean)
       .join(", ");
 
@@ -687,7 +685,7 @@ const sendInquiryReceivedEmails = async (inquiry) => {
             <div><strong>Customer:</strong> ${customer.name || "N/A"}</div>
             <div><strong>Login/Register Email:</strong> ${customerEmail || "N/A"}</div>
             <div><strong>Phone:</strong> ${customer.phone || "N/A"}</div>
-            <div><strong>Address:</strong> ${[customer.address, customer.city, customer.zone, customer.area, customer.zipCode].filter(Boolean).join(", ") || "N/A"}</div>
+            <div><strong>Address:</strong> ${[customer.address, customer.city, customer.zone, customer.zipCode].filter(Boolean).join(", ") || "N/A"}</div>
             ${customer.notes ? `<div><strong>Notes:</strong> ${customer.notes}</div>` : ""}
           </div>
 

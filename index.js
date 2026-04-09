@@ -351,7 +351,7 @@ app.post("/api/send-invoice", async (req, res) => {
             </tr>
             <tr>
               <td style="padding: 5px 0; vertical-align: top;"><strong>Address:</strong></td>
-              <td style="padding: 5px 0;">${customer.address}<br>${[customer.city, customer.zone, customer.area, customer.zipCode].filter(Boolean).join(", ")}</td>
+              <td style="padding: 5px 0;">${customer.address}<br>${[customer.city, customer.zone, customer.zipCode].filter(Boolean).join(", ")}</td>
             </tr>
             ${customer.notes ? `
             <tr>
@@ -444,7 +444,7 @@ app.post("/api/send-invoice", async (req, res) => {
             </tr>
             <tr>
               <td style="padding: 5px 0; vertical-align: top;"><strong>Shipping Address:</strong></td>
-              <td style="padding: 5px 0;">${customer.address}<br>${[customer.city, customer.zone, customer.area, customer.zipCode].filter(Boolean).join(", ")}</td>
+              <td style="padding: 5px 0;">${customer.address}<br>${[customer.city, customer.zone, customer.zipCode].filter(Boolean).join(", ")}</td>
             </tr>
             ${customer.notes ? `
             <tr>

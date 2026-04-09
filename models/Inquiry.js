@@ -66,7 +66,6 @@ const inquirySchema = new mongoose.Schema(
       city: { type: String, required: true, trim: true },
       state: { type: String, trim: true },
       zone: { type: String, required: true, trim: true },
-      area: { type: String, required: true, trim: true },
       zipCode: { type: String, trim: true },
       notes: { type: String, trim: true },
       whatsappNumber: { type: String, trim: true },

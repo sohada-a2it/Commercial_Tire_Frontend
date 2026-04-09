@@ -93,7 +93,6 @@ const invoiceSchema = new mongoose.Schema(
       city: { type: String, trim: true },
       state: { type: String, trim: true },
       zone: { type: String, trim: true },
-      area: { type: String, trim: true },
       zipCode: { type: String, trim: true },
       notes: { type: String, trim: true },
       paymentMethod: { type: String, trim: true, default: "bank" },

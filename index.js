@@ -12,7 +12,11 @@ const categoryRoutes = require("./routes/categoryRoutes");
 
 const app = express();
 
-const GENERAL_CONTACT_EMAIL = process.env.GENERAL_CONTACT_EMAIL || "info@asianimportexport.com";
+const GENERAL_CONTACT_EMAIL =
+  process.env.GENERAL_CONTACT_EMAIL ||
+  process.env.SMTP_USER ||
+  process.env.SALES_EMAIL ||
+  "info@asianimportexport.com";
 const SALES_EMAIL = process.env.SMTP_USER || process.env.SALES_EMAIL || "sale@asianimportexport.com";
 
 const resolveSmtpHost = (rawHost, userEmail) => {
@@ -241,9 +245,12 @@ app.post("/api/send-email", async (req, res) => {
       `;
     }
 
-    const senderAddress = process.env.SMTP_USER || process.env.OWNER_EMAIL;
+    let senderAddress =
+      process.env.SMTP_USER || process.env.OWNER_EMAIL || GENERAL_CONTACT_EMAIL;
     const isProductInquiry = type === "product_inquiry";
-    const adminRecipient = isProductInquiry ? SALES_EMAIL : GENERAL_CONTACT_EMAIL;
+    const adminRecipient = isProductInquiry
+      ? SALES_EMAIL
+      : GENERAL_CONTACT_EMAIL || senderAddress;
 
     await transporter.sendMail({
       from: `"Asian Import Export Co" <${senderAddress}>`,

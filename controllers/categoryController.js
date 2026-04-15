@@ -203,6 +203,26 @@ const mapPublicProduct = (product) => {
   };
 };
 
+const getPublicProductPrice = (product) => normalizeNumber(product?.offerPrice || product?.price || 0);
+
+const comparePublicProductsByPrice = (left, right, direction) => {
+  const leftPrice = getPublicProductPrice(left);
+  const rightPrice = getPublicProductPrice(right);
+
+  if (leftPrice !== rightPrice) {
+    return direction * (leftPrice - rightPrice);
+  }
+
+  const leftSourceId = Number.parseInt(String(left?.sourceId ?? left?._id ?? 0), 10);
+  const rightSourceId = Number.parseInt(String(right?.sourceId ?? right?._id ?? 0), 10);
+
+  if (Number.isFinite(leftSourceId) && Number.isFinite(rightSourceId) && leftSourceId !== rightSourceId) {
+    return leftSourceId - rightSourceId;
+  }
+
+  return String(left?.name || "").localeCompare(String(right?.name || ""));
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CONTROLLER FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -388,6 +408,8 @@ const listPublicProducts = async (req, res) => {
   try {
     const { search, category, subcategory, brand, pattern, isFeatured, all } = req.query;
     const sortBy = String(req.query.sort || "newest");
+    const isPriceSort = sortBy === "price-low-high" || sortBy === "price-high-low";
+    const priceSortDirection = sortBy === "price-high-low" ? -1 : 1;
     const normalize = (value = "") => String(value).trim().toLowerCase();
     const isVehicleTruckTireDataset =
       normalize(category) === "vehicle parts and accessories" &&
@@ -460,25 +482,25 @@ const listPublicProducts = async (req, res) => {
     else if (sortBy === "brand-desc") sortStage = { brand: -1, name: 1 };
 
     if (String(all).toLowerCase() === "true") {
-      const [priorityProducts, otherProducts, productsDefault, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
-        isVehicleTruckTireDataset
+      const [productsDefault, priorityProducts, otherProducts, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
+        Product.find(filter).populate("category"),
+        !isPriceSort && isVehicleTruckTireDataset
           ? Product.find({ $and: [filter, doubleCoinClause] }).sort(sortStage).populate("category")
           : Promise.resolve([]),
-        isVehicleTruckTireDataset
+        !isPriceSort && isVehicleTruckTireDataset
           ? Product.find({ $and: [filter, { $nor: doubleCoinClause.$or }] }).sort(sortStage).populate("category")
           : Promise.resolve([]),
-        isVehicleTruckTireDataset
-          ? Promise.resolve([])
-          : Product.find(filter).sort(sortStage).populate("category"),
         Product.distinct("brand", facetFilter),
         Product.distinct("keyAttributes.Brand", facetFilter),
         Product.distinct("pattern", facetFilter),
         Product.distinct("keyAttributes.Pattern", facetFilter),
       ]);
 
-      const products = isVehicleTruckTireDataset
-        ? [...priorityProducts, ...otherProducts]
-        : productsDefault;
+      const products = isPriceSort
+        ? [...productsDefault].sort((left, right) => comparePublicProductsByPrice(left, right, priceSortDirection))
+        : isVehicleTruckTireDataset
+          ? [...priorityProducts, ...otherProducts]
+          : productsDefault;
 
       const brands = Array.from(
         new Set(
@@ -512,7 +534,25 @@ const listPublicProducts = async (req, res) => {
     let patternsDirect = [];
     let patternsFromAttributes = [];
 
-    if (isVehicleTruckTireDataset) {
+    if (isPriceSort) {
+      const [allProducts, totalCount, bd, bfa, pd, pfa] = await Promise.all([
+        Product.find(filter).populate("category"),
+        Product.countDocuments(filter),
+        Product.distinct("brand", facetFilter),
+        Product.distinct("keyAttributes.Brand", facetFilter),
+        Product.distinct("pattern", facetFilter),
+        Product.distinct("keyAttributes.Pattern", facetFilter),
+      ]);
+
+      total = totalCount;
+      brandsDirect = bd;
+      brandsFromAttributes = bfa;
+      patternsDirect = pd;
+      patternsFromAttributes = pfa;
+
+      const sortedProducts = [...allProducts].sort((left, right) => comparePublicProductsByPrice(left, right, priceSortDirection));
+      products = sortedProducts.slice(skip, skip + limit);
+    } else if (isVehicleTruckTireDataset) {
       const [priorityCount, otherCount, bd, bfa, pd, pfa] = await Promise.all([
         Product.countDocuments({ $and: [filter, doubleCoinClause] }),
         Product.countDocuments({ $and: [filter, { $nor: doubleCoinClause.$or }] }),

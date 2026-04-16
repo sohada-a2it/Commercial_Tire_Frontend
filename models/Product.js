@@ -110,6 +110,10 @@ const productSchema = new mongoose.Schema(
     isFeatured: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+     isFeatured: { 
+    type: Boolean, 
+    default: false 
+  },
   },
   { timestamps: true }
 );
@@ -137,6 +141,12 @@ productSchema.pre("validate", async function autoAssignSourceId(next) {
   } catch (error) {
     return next(error);
   }
+});
+productSchema.virtual("featuredInfo", {
+  ref: "FeaturedProduct",
+  localField: "_id",
+  foreignField: "productId",
+  justOne: true
 });
 
 const Product = mongoose.model("Product", productSchema);

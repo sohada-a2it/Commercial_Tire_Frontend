@@ -120,7 +120,7 @@ const uploadCatalogAsset = async (asset, fallbackName = "") => {
   try {
     await fs.access(localPath);
     const uploaded = await cloudinary.uploader.upload(localPath, {
-      folder: process.env.CLOUDINARY_CATALOG_FOLDER || "asian-import-export/catalog",
+      folder: process.env.CLOUDINARY_CATALOG_FOLDER || "Commercial_Tire/catalog",
       resource_type: "image",
       overwrite: false,
       quality: "auto:good",
@@ -862,6 +862,8 @@ const createProduct = async (req, res) => {
   }
 };
 
+// controllers/catalogController.js এ updateProduct ফাংশন আপডেট করুন
+
 const updateProduct = async (req, res) => {
   try {
     const product = await findProductByRouteId(req.params.productId);
@@ -870,8 +872,32 @@ const updateProduct = async (req, res) => {
     }
 
     const payload = await syncProductCategoryFields(normalizeProductPayload(req.body));
+    
+    // Check if isFeatured status changed
+    const wasFeatured = product.isFeatured;
+    const willBeFeatured = payload.isFeatured;
+    
     Object.assign(product, payload);
     await product.save();
+    
+    // Sync with FeaturedProduct collection
+    if (willBeFeatured && !wasFeatured) {
+      // Add to featured products
+      const FeaturedProduct = require("../models/FeaturedProduct");
+      const existing = await FeaturedProduct.findOne({ productId: product._id });
+      if (!existing) {
+        await FeaturedProduct.create({
+          productId: product._id,
+          order: 0,
+          addedBy: req.authUser?.email || "system",
+          isActive: true
+        });
+      }
+    } else if (!willBeFeatured && wasFeatured) {
+      // Remove from featured products
+      const FeaturedProduct = require("../models/FeaturedProduct");
+      await FeaturedProduct.findOneAndDelete({ productId: product._id });
+    }
 
     res.json({ success: true, product: mapProduct(product) });
   } catch (error) {

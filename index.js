@@ -9,7 +9,7 @@ const orderFlowRoutes = require("./routes/orderFlowRoutes");
 const addressRoutes = require("./routes/addressRoutes");
 const catalogRoutes = require("./routes/catalogRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
-
+const featuredProductRoutes = require("./routes/featuredRoute");
 const app = express();
 
 const GENERAL_CONTACT_EMAIL =
@@ -89,6 +89,7 @@ app.use("/api", orderFlowRoutes);
 app.use("/api/addresses", addressRoutes);
 app.use("/api/catalog", catalogRoutes);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/featured-products", featuredProductRoutes);
 
 // Email endpoint
 app.post("/api/send-email", async (req, res) => {

@@ -172,8 +172,32 @@ const upsertImportedMediaAsset = async ({
   );
 };
 
+// In catalogController.js - update normalizeProductPayload
+
 const normalizeProductPayload = (payload = {}) => {
   const resolvedSourceId = normalizeSourceId(payload.sourceId ?? payload.id);
+
+  // Helper to get primary value from array or string
+  const getPrimaryValue = (value, defaultValue) => {
+    if (Array.isArray(value) && value.length > 0) {
+      return String(value[0]).trim();
+    }
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+    return defaultValue;
+  };
+
+  // Helper to get array from value
+  const getArrayValue = (value, defaultValue) => {
+    if (Array.isArray(value)) {
+      return value.filter(v => v).map(v => String(v).trim());
+    }
+    if (typeof value === 'string' && value.trim()) {
+      return [value.trim()];
+    }
+    return defaultValue;
+  };
 
   return {
     ...(resolvedSourceId !== undefined ? { sourceId: resolvedSourceId } : {}),
@@ -196,6 +220,7 @@ const normalizeProductPayload = (payload = {}) => {
     customizationOptions: Array.isArray(payload.customizationOptions) ? payload.customizationOptions.map((item) => String(item)) : [],
     shipping: String(payload.shipping || "").trim(),
     description: String(payload.description || "").trim(),
+    shortDescription: String(payload.shortDescription || "").trim(),
     image: normalizeAsset(payload.image || {}),
     images: Array.isArray(payload.images) ? payload.images.map((item) => normalizeAsset(item)) : [],
     keyAttributes: payload.keyAttributes || {},
@@ -205,7 +230,19 @@ const normalizeProductPayload = (payload = {}) => {
     tags: Array.isArray(payload.tags) ? payload.tags.map((tag) => String(tag)) : [],
     isFeatured: Boolean(payload.isFeatured),
     isActive: payload.isActive === undefined ? true : Boolean(payload.isActive),
+    isNewArrival: Boolean(payload.isNewArrival),
+    isBestSeller: Boolean(payload.isBestSeller),
     metadata: payload.metadata || {},
+    // Tire-specific fields
+    tireType: getPrimaryValue(payload.tireType, 'all-position'),
+    primaryVehicleType: getPrimaryValue(payload.vehicleType || payload.primaryVehicleType, 'truck'),
+    primaryApplication: getPrimaryValue(payload.application || payload.primaryApplication, 'highway'),
+    vehicleTypesList: getArrayValue(payload.vehicleTypesList || payload.vehicleType, ['truck']),
+    applicationsList: getArrayValue(payload.applicationsList || payload.application, ['highway']),
+    tireSpecs: payload.tireSpecs || {},
+    resources: payload.resources || {},
+    videoUrl: String(payload.videoUrl || "").trim(),
+    threeSixtyImages: Array.isArray(payload.threeSixtyImages) ? payload.threeSixtyImages.map((item) => normalizeAsset(item)) : [],
   };
 };
 
@@ -242,12 +279,10 @@ const resolveExistingProductForImport = async (productPayload) => {
 };
 
 const normalizeSubcategories = (subcategories) => {
-  // Handle null, undefined, or non-array values
   if (!subcategories) {
     return [];
   }
 
-  // If it's a string (possibly JSON), try to parse it
   if (typeof subcategories === "string") {
     try {
       subcategories = JSON.parse(subcategories);
@@ -256,22 +291,18 @@ const normalizeSubcategories = (subcategories) => {
     }
   }
 
-  // Ensure it's an array
   if (!Array.isArray(subcategories)) {
     return [];
   }
 
-  // Normalize each subcategory and filter out invalid ones
   return subcategories
     .map((subcategory, index) => {
       if (!subcategory || typeof subcategory !== "object") {
         return null;
       }
 
-      // Extract name from various possible formats
       const name = String(subcategory.name || subcategory.title || "").trim();
       
-      // Skip subcategories without a valid name
       if (!name) {
         return null;
       }
@@ -354,6 +385,7 @@ const mapProduct = (product) => ({
   customizationOptions: product.customizationOptions || [],
   shipping: product.shipping,
   description: product.description,
+  shortDescription: product.shortDescription,
   image: product.image || { url: "", publicId: "" },
   images: product.images || [],
   keyAttributes: product.keyAttributes || {},
@@ -363,11 +395,26 @@ const mapProduct = (product) => ({
   tags: product.tags || [],
   isFeatured: product.isFeatured,
   isActive: product.isActive,
+  isNewArrival: product.isNewArrival,
+  isBestSeller: product.isBestSeller,
   metadata: product.metadata || {},
   createdAt: product.createdAt,
   updatedAt: product.updatedAt,
+  // Tire-specific fields - send both formats for frontend compatibility
+  tireType: product.tireType,
+  vehicleType: product.vehicleTypesList,      // Array for frontend multi-select
+  application: product.applicationsList,      // Array for frontend multi-select
+  primaryVehicleType: product.primaryVehicleType,  // String for backend
+  primaryApplication: product.primaryApplication,  // String for backend
+  vehicleTypesList: product.vehicleTypesList,
+  applicationsList: product.applicationsList,
+  tireSpecs: product.tireSpecs,
+  resources: product.resources,
+  videoUrl: product.videoUrl,
+  threeSixtyImages: product.threeSixtyImages,
 });
 
+// UPDATED: Enhanced buildQuery with tire-specific filters
 const buildQuery = (query = {}) => {
   const clauses = [];
 
@@ -414,6 +461,35 @@ const buildQuery = (query = {}) => {
   if (query.brand) {
     const regex = { $regex: String(query.brand), $options: "i" };
     clauses.push({ $or: [{ brand: regex }, { "keyAttributes.Brand": regex }] });
+  }
+
+  // NEW: Tire-specific filters
+  if (query.tireType) {
+    clauses.push({ tireType: query.tireType });
+  }
+
+  if (query.vehicleType) {
+    clauses.push({ vehicleType: { $in: [query.vehicleType] } });
+  }
+
+  if (query.application) {
+    clauses.push({ application: { $in: [query.application] } });
+  }
+
+  if (query.tireSize) {
+    clauses.push({ 'tireSpecs.size': { $regex: String(query.tireSize), $options: 'i' } });
+  }
+
+  if (query.loadIndex) {
+    clauses.push({ 'tireSpecs.loadIndex': query.loadIndex });
+  }
+
+  if (query.speedRating) {
+    clauses.push({ 'tireSpecs.speedRating': query.speedRating });
+  }
+
+  if (query.minLoadIndex) {
+    clauses.push({ 'tireSpecs.loadIndex': { $gte: query.minLoadIndex } });
   }
 
   if (query.isActive !== undefined) {
@@ -527,6 +603,8 @@ const downloadUrlToBuffer = (urlString) =>
       reject(error);
     }
   });
+
+// ==================== CATEGORY CONTROLLERS ====================
 
 const listCategories = async (req, res) => {
   try {
@@ -648,7 +726,6 @@ const updateCategory = async (req, res) => {
     category.isActive = payload.isActive;
     category.image = payload.image;
     
-    // Only update subcategories if provided in request
     if (req.body.subcategories !== undefined) {
       category.subcategories = payload.subcategories;
     }
@@ -678,6 +755,8 @@ const deleteCategory = async (req, res) => {
   }
 };
 
+// ==================== PRODUCT CONTROLLERS ====================
+
 const listProducts = async (req, res) => {
   try {
     const filter = buildQuery(req.query);
@@ -690,8 +769,6 @@ const listProducts = async (req, res) => {
     else if (sortBy === "brand-asc") sort = { brand: 1, name: 1 };
     else if (sortBy === "brand-desc") sort = { brand: -1, name: 1 };
 
-    // Build separate filters for each facet that exclude that specific filter
-    // This allows showing all available options even when a filter is selected
     const buildFacetFilter = (excludeField) => {
       const clauses = [];
 
@@ -740,6 +817,19 @@ const listProducts = async (req, res) => {
         clauses.push({ $or: [{ brand: regex }, { "keyAttributes.Brand": regex }] });
       }
 
+      // Tire-specific facet filters
+      if (req.query.tireType && excludeField !== "tireType") {
+        clauses.push({ tireType: req.query.tireType });
+      }
+
+      if (req.query.vehicleType && excludeField !== "vehicleType") {
+        clauses.push({ vehicleType: { $in: [req.query.vehicleType] } });
+      }
+
+      if (req.query.application && excludeField !== "application") {
+        clauses.push({ application: { $in: [req.query.application] } });
+      }
+
       if (req.query.isActive !== undefined) {
         clauses.push({ isActive: req.query.isActive === "true" || req.query.isActive === true });
       }
@@ -749,16 +839,17 @@ const listProducts = async (req, res) => {
       return { $and: clauses };
     };
 
-    // Main filter for products
-    // Facet filters for each option (exclude the specific facet to show all available values)
     const facetFilters = {
       brand: buildFacetFilter("brand"),
       category: buildFacetFilter("category"),
       subcategory: buildFacetFilter("subcategoryId"),
       pattern: buildFacetFilter("pattern"),
+      tireType: buildFacetFilter("tireType"),
+      vehicleType: buildFacetFilter("vehicleType"),
+      application: buildFacetFilter("application"),
     };
 
-    const [products, total, allCategories, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes] = await Promise.all([
+    const [products, total, allCategories, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes, tireTypes, vehicleTypes, applications, tireSizes] = await Promise.all([
       Product.find(filter).sort(sort).skip(skip).limit(limit).populate("category"),
       Product.countDocuments(filter),
       Category.find({ isActive: true }).select("name subcategories").lean(),
@@ -766,9 +857,12 @@ const listProducts = async (req, res) => {
       Product.distinct("keyAttributes.Brand", facetFilters.brand),
       Product.distinct("pattern", facetFilters.pattern),
       Product.distinct("keyAttributes.Pattern", facetFilters.pattern),
+      Product.distinct("tireType", facetFilters.tireType),
+      Product.distinct("vehicleType", facetFilters.vehicleType),
+      Product.distinct("application", facetFilters.application),
+      Product.distinct("tireSpecs.size", facetFilters.tireType),
     ]);
 
-    // Build categoryMap: { categoryName: [subcategoryNames] }
     const categoryMap = {};
     allCategories.forEach((cat) => {
       const catName = String(cat.name || "").trim();
@@ -780,10 +874,7 @@ const listProducts = async (req, res) => {
       }
     });
 
-    // Extract all category names sorted
     const categories = Object.keys(categoryMap).sort((a, b) => a.localeCompare(b));
-
-    // Extract all subcategory names (flat list for backward compatibility)
     const subcategories = Object.values(categoryMap)
       .flat()
       .filter((value, index, self) => self.indexOf(value) === index)
@@ -806,6 +897,14 @@ const listProducts = async (req, res) => {
       )
     ).sort((a, b) => a.localeCompare(b));
 
+    const tireSizeList = Array.from(
+      new Set(
+        (tireSizes || [])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
     res.json({
       success: true,
       products: products.map(mapProduct),
@@ -823,6 +922,10 @@ const listProducts = async (req, res) => {
         categoryMap,
         brands,
         patterns,
+        tireTypes: tireTypes.filter(t => t),
+        vehicleTypes: vehicleTypes.flat().filter(v => v),
+        applications: applications.flat().filter(a => a),
+        tireSizes: tireSizeList,
       },
     });
   } catch (error) {
@@ -862,8 +965,6 @@ const createProduct = async (req, res) => {
   }
 };
 
-// controllers/catalogController.js এ updateProduct ফাংশন আপডেট করুন
-
 const updateProduct = async (req, res) => {
   try {
     const product = await findProductByRouteId(req.params.productId);
@@ -873,16 +974,13 @@ const updateProduct = async (req, res) => {
 
     const payload = await syncProductCategoryFields(normalizeProductPayload(req.body));
     
-    // Check if isFeatured status changed
     const wasFeatured = product.isFeatured;
     const willBeFeatured = payload.isFeatured;
     
     Object.assign(product, payload);
     await product.save();
     
-    // Sync with FeaturedProduct collection
     if (willBeFeatured && !wasFeatured) {
-      // Add to featured products
       const FeaturedProduct = require("../models/FeaturedProduct");
       const existing = await FeaturedProduct.findOne({ productId: product._id });
       if (!existing) {
@@ -894,7 +992,6 @@ const updateProduct = async (req, res) => {
         });
       }
     } else if (!willBeFeatured && wasFeatured) {
-      // Remove from featured products
       const FeaturedProduct = require("../models/FeaturedProduct");
       await FeaturedProduct.findOneAndDelete({ productId: product._id });
     }
@@ -918,6 +1015,324 @@ const deleteProduct = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ==================== TIRE FINDER TOOL ====================
+
+const getRecommendationReason = (tire, criteria) => {
+  const reasons = [];
+  if (criteria.roadType === 'highway' && tire.application?.includes('highway')) {
+    reasons.push('Optimized for highway fuel efficiency');
+  }
+  if (criteria.roadType === 'mixed' && tire.application?.includes('mixed-service')) {
+    reasons.push('Designed for mixed on/off-road conditions');
+  }
+  if (criteria.roadType === 'off-road' && (tire.application?.includes('off-road') || tire.application?.includes('mining'))) {
+    reasons.push('Heavy-duty off-road construction for maximum durability');
+  }
+  if (criteria.loadWeight === 'heavy' && tire.tireSpecs?.loadIndex >= 150) {
+    reasons.push('Heavy load capacity suitable for your requirements');
+  }
+  if (criteria.loadWeight === 'light' && tire.tireSpecs?.loadIndex < 140) {
+    reasons.push('Light load rating matches your fleet needs');
+  }
+  if (criteria.vehicleType === 'truck' && tire.vehicleType?.includes('truck')) {
+    reasons.push('Specifically designed for truck applications');
+  }
+  return reasons.join('. ') || 'Recommended based on your criteria';
+};
+
+const findTiresByCriteria = async (req, res) => {
+  try {
+    const {
+      vehicleType,
+      roadType,
+      loadWeight,
+      tireSize,
+      application
+    } = req.query;
+
+    const filter = { isActive: true };
+    
+    if (vehicleType) {
+      filter.vehicleType = { $in: [vehicleType] };
+    }
+    
+    if (roadType === 'highway') {
+      filter.application = { $in: ['highway', 'regional'] };
+    } else if (roadType === 'mixed') {
+      filter.application = { $in: ['mixed-service', 'regional'] };
+    } else if (roadType === 'off-road') {
+      filter.application = { $in: ['off-road', 'mining', 'construction'] };
+    }
+    
+    if (loadWeight === 'heavy') {
+      filter['tireSpecs.loadIndex'] = { $gte: '150' };
+    } else if (loadWeight === 'medium') {
+      filter['tireSpecs.loadIndex'] = { $gte: '140', $lte: '149' };
+    }
+    
+    if (tireSize) {
+      filter['tireSpecs.size'] = { $regex: tireSize, $options: 'i' };
+    }
+    
+    if (application) {
+      filter.application = { $in: [application] };
+    }
+    
+    const recommendedTires = await Product.find(filter)
+      .limit(10)
+      .populate('category');
+    
+    const results = recommendedTires.map(tire => ({
+      ...mapProduct(tire),
+      recommendationReason: getRecommendationReason(tire, { vehicleType, roadType, loadWeight })
+    }));
+    
+    res.json({
+      success: true,
+      criteria: { vehicleType, roadType, loadWeight, tireSize, application },
+      recommendations: results,
+      total: results.length
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================== COMPARE TIRES ====================
+
+const compareTires = async (req, res) => {
+  try {
+    const { productIds } = req.body;
+    
+    if (!productIds || !Array.isArray(productIds) || productIds.length < 2) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "At least 2 tire models required for comparison" 
+      });
+    }
+    
+    if (productIds.length > 4) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Maximum 4 tires can be compared at once" 
+      });
+    }
+    
+    const tires = await Product.find({ 
+      _id: { $in: productIds },
+      isActive: true 
+    }).populate('category');
+    
+    if (tires.length !== productIds.length) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Some tire models not found" 
+      });
+    }
+    
+    const comparisonData = tires.map(tire => ({
+      id: tire._id,
+      name: tire.name,
+      pattern: tire.pattern,
+      image: tire.image,
+      category: tire.categoryName,
+      specs: {
+        size: tire.tireSpecs?.size,
+        loadIndex: tire.tireSpecs?.loadIndex,
+        speedRating: tire.tireSpecs?.speedRating,
+        treadPattern: tire.tireSpecs?.treadPattern,
+        plyRating: tire.tireSpecs?.plyRating,
+        treadDepth: tire.tireSpecs?.treadDepth,
+        stdRim: tire.tireSpecs?.stdRim,
+        overallDiameter: tire.tireSpecs?.overallDiameter,
+        sectionWidth: tire.tireSpecs?.sectionWidth,
+        maxLoad: tire.tireSpecs?.maxLoad,
+        maxInflation: tire.tireSpecs?.maxInflation,
+      },
+      classification: {
+        tireType: tire.tireType,
+        vehicleType: tire.vehicleType,
+        application: tire.application
+      },
+      features: {
+        description: tire.shortDescription || tire.description?.substring(0, 200),
+        brochure: tire.resources?.brochure?.url,
+        datasheet: tire.resources?.datasheet?.url
+      }
+    }));
+    
+    res.json({
+      success: true,
+      comparison: comparisonData
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================== B2B INQUIRY ====================
+
+const createB2BInquiry = async (req, res) => {
+  try {
+    const Inquiry = require("../models/Inquiry");
+    
+    const {
+      companyName,
+      companyType,
+      contactPerson,
+      email,
+      phone,
+      country,
+      city,
+      address,
+      items,
+      message,
+      preferredContactMethod,
+      preferredCurrency,
+      deliveryTerm,
+      expectedDeliveryDate,
+      priority
+    } = req.body;
+    
+    // Validation
+    if (!companyName || !contactPerson || !email || !phone || !items || items.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required fields: companyName, contactPerson, email, phone, and at least one item" 
+      });
+    }
+    
+    const inquiryNumber = `INQ-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    
+    const productIds = items.map(item => item.productId).filter(id => id);
+    const products = productIds.length ? await Product.find({ _id: { $in: productIds } }) : [];
+    const productMap = new Map(products.map(p => [p._id.toString(), p]));
+    
+    const inquiryItems = items.map(item => {
+      const product = item.productId ? productMap.get(item.productId) : null;
+      return {
+        productId: item.productId,
+        tireModel: product?.name || item.tireModel,
+        tireSize: product?.tireSpecs?.size || item.tireSize,
+        quantity: item.quantity,
+        application: item.application,
+        specialRequirements: item.specialRequirements
+      };
+    });
+    
+    const inquiry = await Inquiry.create({
+      inquiryNumber,
+      customer: req.authUser?._id || null,
+      customerSnapshot: {
+        name: contactPerson,
+        email,
+        phone,
+        companyName,
+        companyType: companyType || 'fleet_owner',
+        address: address || '',
+        city: city || '',
+        country: country || '',
+        notes: message
+      },
+      items: inquiryItems,
+      status: 'new',
+      priority: priority || 'medium',
+      source: 'website_form',
+      preferredCurrency: preferredCurrency || 'USD',
+      deliveryTerm: deliveryTerm || 'FOB',
+      expectedDeliveryDate: expectedDeliveryDate ? new Date(expectedDeliveryDate) : null,
+      contactChannel: preferredContactMethod || 'email'
+    });
+    
+    res.status(201).json({
+      success: true,
+      message: "Inquiry submitted successfully",
+      inquiryNumber: inquiry.inquiryNumber,
+      inquiryId: inquiry._id
+    });
+  } catch (error) {
+    console.error("B2B Inquiry error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================== DEALER LOCATOR ====================
+
+const findNearbyDealers = async (req, res) => {
+  try {
+    const Dealer = require("../models/Dealer");
+    const { lat, lng, maxDistance = 50000, country, city, search } = req.query;
+    
+    let filter = { isActive: true, isAuthorized: true };
+    
+    if (country) filter['address.country'] = { $regex: country, $options: 'i' };
+    if (city) filter['address.city'] = { $regex: city, $options: 'i' };
+    
+    let dealers;
+    
+    if (lat && lng) {
+      dealers = await Dealer.find({
+        ...filter,
+        'address.location': {
+          $near: {
+            $geometry: {
+              type: "Point",
+              coordinates: [parseFloat(lng), parseFloat(lat)]
+            },
+            $maxDistance: parseInt(maxDistance)
+          }
+        }
+      }).limit(20);
+    } else if (search) {
+      dealers = await Dealer.find({
+        ...filter,
+        $text: { $search: search }
+      }).limit(20);
+    } else {
+      dealers = await Dealer.find(filter).limit(20);
+    }
+    
+    const calculateDistance = (lat1, lon1, lat2, lon2) => {
+      if (!lat1 || !lon1) return null;
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return Math.round(R * c * 10) / 10;
+    };
+    
+    res.json({
+      success: true,
+      dealers: dealers.map(dealer => ({
+        id: dealer._id,
+        name: dealer.name,
+        company: dealer.company,
+        fullAddress: dealer.fullAddress,
+        address: dealer.address,
+        phone: dealer.phone,
+        email: dealer.email,
+        website: dealer.website,
+        workingHours: dealer.workingHours,
+        isAuthorized: dealer.isAuthorized,
+        certifications: dealer.certifications,
+        specialties: dealer.specialties,
+        distance: (lat && lng && dealer.address.location?.coordinates) ? 
+          calculateDistance(parseFloat(lat), parseFloat(lng), 
+            dealer.address.location.coordinates[1], 
+            dealer.address.location.coordinates[0]) : null
+      }))
+    });
+  } catch (error) {
+    console.error("Dealer locator error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================== MEDIA CONTROLLERS ====================
 
 const listMedia = async (req, res) => {
   try {
@@ -1017,21 +1432,16 @@ const uploadMediaFromUrl = async (req, res) => {
       return res.status(400).json({ success: false, message: "Image URL is required" });
     }
 
-    // Validate URL format
     try {
       new url.URL(imageUrl);
     } catch (_error) {
       return res.status(400).json({ success: false, message: "Invalid URL format" });
     }
 
-    // Download URL to buffer
     const { buffer, filename } = await downloadUrlToBuffer(imageUrl);
-
-    // Upload buffer to Cloudinary
     const uploaded = await uploadBufferToCloudinary(buffer, filename);
     const metadata = req.body.metadata ? JSON.parse(req.body.metadata) : {};
 
-    // Create media record
     const media = await MediaAsset.create({
       publicId: uploaded.public_id,
       assetType: uploaded.resource_type || "image",
@@ -1101,6 +1511,8 @@ const deleteMedia = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ==================== IMPORT ====================
 
 const importCatalogFromJson = async (_req, res) => {
   try {
@@ -1291,6 +1703,11 @@ module.exports = {
   uploadMediaFromUrl,
   deleteMedia,
   importCatalogFromJson,
+  // NEW EXPORTS
+  findTiresByCriteria,
+  compareTires,
+  createB2BInquiry,
+  findNearbyDealers,
   normalizeCategoryPayload,
   normalizeSubcategories,
   normalizeProductPayload,

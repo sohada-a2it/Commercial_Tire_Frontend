@@ -13,7 +13,7 @@ const dealerSchema = new mongoose.Schema(
       postalCode: { type: String, trim: true },
     },
 
-    // 🌍 GEO LOCATION (ROOT LEVEL ONLY)
+    // 🌍 GEO LOCATION (IMPORTANT FIXED)
     location: {
       type: {
         type: String,
@@ -67,7 +67,7 @@ const dealerSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// 🌍 GEO INDEX
+// 🌍 GEO INDEX (VERY IMPORTANT)
 dealerSchema.index({ location: "2dsphere" });
 
 // 🔎 TEXT SEARCH INDEX

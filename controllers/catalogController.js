@@ -172,8 +172,6 @@ const upsertImportedMediaAsset = async ({
   );
 };
 
-// In catalogController.js - update normalizeProductPayload
-
 const normalizeProductPayload = (payload = {}) => {
   const resolvedSourceId = normalizeSourceId(payload.sourceId ?? payload.id);
 
@@ -233,12 +231,18 @@ const normalizeProductPayload = (payload = {}) => {
     isNewArrival: Boolean(payload.isNewArrival),
     isBestSeller: Boolean(payload.isBestSeller),
     metadata: payload.metadata || {},
-    // Tire-specific fields
+    
+    // Tire-specific fields - FIXED
     tireType: getPrimaryValue(payload.tireType, 'all-position'),
-    primaryVehicleType: getPrimaryValue(payload.vehicleType || payload.primaryVehicleType, 'truck'),
-    primaryApplication: getPrimaryValue(payload.application || payload.primaryApplication, 'highway'),
+    
+    // Store both as array and string
     vehicleTypesList: getArrayValue(payload.vehicleTypesList || payload.vehicleType, ['truck']),
     applicationsList: getArrayValue(payload.applicationsList || payload.application, ['highway']),
+    
+    // Primary/single values
+    primaryVehicleType: getPrimaryValue(payload.primaryVehicleType || payload.vehicleType, 'truck'),
+    primaryApplication: getPrimaryValue(payload.primaryApplication || payload.application, 'highway'),
+    
     tireSpecs: payload.tireSpecs || {},
     resources: payload.resources || {},
     videoUrl: String(payload.videoUrl || "").trim(),
@@ -362,57 +366,100 @@ const mapCategory = (category) => ({
   createdAt: category.createdAt,
   updatedAt: category.updatedAt,
 });
+ 
+// catalogController.js - mapProduct function সম্পূর্ণ আপডেট
 
-const mapProduct = (product) => ({
-  id: product._id,
-  sourceId: product.sourceId,
-  name: product.name,
-  slug: product.slug,
-  sku: product.sku,
-  category: product.category?._id || product.category,
-  mainCategory: product.mainCategory || product.categoryName,
-  subCategory: product.subCategory || product.subcategoryName,
-  categoryName: product.categoryName,
-  categoryIcon: product.categoryIcon,
-  subcategoryId: product.subcategoryId,
-  subcategoryName: product.subcategoryName,
-  subcategorySlug: product.subcategorySlug,
-  pattern: product.pattern || product.keyAttributes?.Pattern || "",
-  brand: product.brand || product.keyAttributes?.Brand || "",
-  price: product.price,
-  offerPrice: product.offerPrice,
-  pricingTiers: product.pricingTiers || [],
-  customizationOptions: product.customizationOptions || [],
-  shipping: product.shipping,
-  description: product.description,
-  shortDescription: product.shortDescription,
-  image: product.image || { url: "", publicId: "" },
-  images: product.images || [],
-  keyAttributes: product.keyAttributes || {},
-  packagingAndDelivery: product.packagingAndDelivery || {},
-  priceSource: product.priceSource,
-  userReviews: product.userReviews || [],
-  tags: product.tags || [],
-  isFeatured: product.isFeatured,
-  isActive: product.isActive,
-  isNewArrival: product.isNewArrival,
-  isBestSeller: product.isBestSeller,
-  metadata: product.metadata || {},
-  createdAt: product.createdAt,
-  updatedAt: product.updatedAt,
-  // Tire-specific fields - send both formats for frontend compatibility
-  tireType: product.tireType,
-  vehicleType: product.vehicleTypesList,      // Array for frontend multi-select
-  application: product.applicationsList,      // Array for frontend multi-select
-  primaryVehicleType: product.primaryVehicleType,  // String for backend
-  primaryApplication: product.primaryApplication,  // String for backend
-  vehicleTypesList: product.vehicleTypesList,
-  applicationsList: product.applicationsList,
-  tireSpecs: product.tireSpecs,
-  resources: product.resources,
-  videoUrl: product.videoUrl,
-  threeSixtyImages: product.threeSixtyImages,
-});
+const mapProduct = (product) => {
+  // Ensure product is a Mongoose document with toObject
+  const productData = product.toObject ? product.toObject() : product;
+  
+  return {
+    id: productData._id,
+    sourceId: productData.sourceId,
+    name: productData.name || "",
+    slug: productData.slug || "",
+    sku: productData.sku || "",
+    category: productData.category?._id || productData.category,
+    categoryName: productData.categoryName || "",
+    categoryIcon: productData.categoryIcon || "",
+    subcategoryId: productData.subcategoryId,
+    subcategoryName: productData.subcategoryName || "",
+    subcategorySlug: productData.subcategorySlug || "",
+    pattern: productData.pattern || productData.keyAttributes?.Pattern || "",
+    brand: productData.brand || productData.keyAttributes?.Brand || "",
+    price: productData.price || "",
+    offerPrice: productData.offerPrice || "",
+    pricingTiers: productData.pricingTiers || [],
+    customizationOptions: productData.customizationOptions || [],
+    shipping: productData.shipping || "",
+    description: productData.description || "",
+    shortDescription: productData.shortDescription || "",
+    image: productData.image || { url: "", publicId: "" },
+    images: productData.images || [],
+    keyAttributes: productData.keyAttributes || {},
+    packagingAndDelivery: productData.packagingAndDelivery || {},
+    priceSource: productData.priceSource || "",
+    userReviews: productData.userReviews || [],
+    tags: productData.tags || [],
+    isFeatured: productData.isFeatured || false,
+    isActive: productData.isActive !== false,
+    isNewArrival: productData.isNewArrival || false,
+    isBestSeller: productData.isBestSeller || false,
+    metadata: productData.metadata || {},
+    createdAt: productData.createdAt,
+    updatedAt: productData.updatedAt,
+    
+    // ========== টায়ার স্পেসিফিকেশন - এখানে মনযোগ দিন ==========
+    
+    // Tire Type - সিঙ্গেল স্ট্রিং
+    tireType: productData.tireType || "",
+    
+    // Vehicle Types - অ্যারে ফরম্যাটে
+    vehicleType: Array.isArray(productData.vehicleTypesList) ? productData.vehicleTypesList : 
+                 (productData.vehicleTypesListsList ? productData.vehicleTypesListsList : []),
+    
+    // Applications - অ্যারে ফরম্যাটে  
+    application: Array.isArray(productData.applicationsList) ? productData.applicationsList :
+                 (productData.applicationsListsList ? productData.applicationsListsList : []),
+    
+    // Primary values (সিঙ্গেল ভ্যালু)
+    primaryVehicleType: productData.primaryvehicleTypesList || productData.primaryVehicleType || "",
+    primaryApplication: productData.primaryapplicationsList || productData.primaryApplication || "",
+    
+    // Raw arrays (ব্যাকওয়ার্ড কম্প্যাটিবিলিটির জন্য)
+    vehicleTypesList: Array.isArray(productData.vehicleTypesList) ? productData.vehicleTypesList : [],
+    applicationsList: Array.isArray(productData.applicationsList) ? productData.applicationsList : [],
+    
+    // ========== টায়ার স্পেসিফিকেশন ডিটেইলস ==========
+    tireSpecs: {
+      size: productData.tireSpecs?.size || "",
+      loadIndex: productData.tireSpecs?.loadIndex || "",
+      speedRating: productData.tireSpecs?.speedRating || "",
+      treadPattern: productData.tireSpecs?.treadPattern || "",
+      plyRating: productData.tireSpecs?.plyRating || "",
+      loadRange: productData.tireSpecs?.loadRange || "",
+      stdRim: productData.tireSpecs?.stdRim || "",
+      overallDiameter: productData.tireSpecs?.overallDiameter || "",
+      sectionWidth: productData.tireSpecs?.sectionWidth || "",
+      treadDepth: productData.tireSpecs?.treadDepth || "",
+      maxLoad: productData.tireSpecs?.maxLoad || "",
+      maxInflation: productData.tireSpecs?.maxInflation || "",
+      constructionType: productData.tireSpecs?.constructionType || "",
+      singleMaxLoad: productData.tireSpecs?.singleMaxLoad || "",
+      singleMaxPressure: productData.tireSpecs?.singleMaxPressure || "",
+      dualMaxLoad: productData.tireSpecs?.dualMaxLoad || "",
+      dualMaxPressure: productData.tireSpecs?.dualMaxPressure || "",
+      staticLoadRadius: productData.tireSpecs?.staticLoadRadius || "",
+      weight: productData.tireSpecs?.weight || "",
+      weightUnit: productData.tireSpecs?.weightUnit || "lbs",
+      revsPerKm: productData.tireSpecs?.revsPerKm || "",
+    },
+    
+    resources: productData.resources || {},
+    videoUrl: productData.videoUrl || "",
+    threeSixtyImages: productData.threeSixtyImages || [],
+  };
+};
 
 // UPDATED: Enhanced buildQuery with tire-specific filters
 const buildQuery = (query = {}) => {
@@ -468,12 +515,12 @@ const buildQuery = (query = {}) => {
     clauses.push({ tireType: query.tireType });
   }
 
-  if (query.vehicleType) {
-    clauses.push({ vehicleType: { $in: [query.vehicleType] } });
+  if (query.vehicleTypesList) {
+    clauses.push({ vehicleTypesList: { $in: [query.vehicleTypesList] } });
   }
 
-  if (query.application) {
-    clauses.push({ application: { $in: [query.application] } });
+  if (query.applicationsList) {
+    clauses.push({ applicationsList: { $in: [query.applicationsList] } });
   }
 
   if (query.tireSize) {
@@ -822,12 +869,12 @@ const listProducts = async (req, res) => {
         clauses.push({ tireType: req.query.tireType });
       }
 
-      if (req.query.vehicleType && excludeField !== "vehicleType") {
-        clauses.push({ vehicleType: { $in: [req.query.vehicleType] } });
+      if (req.query.vehicleTypesList && excludeField !== "vehicleTypesList") {
+        clauses.push({ vehicleTypesList: { $in: [req.query.vehicleTypesList] } });
       }
 
-      if (req.query.application && excludeField !== "application") {
-        clauses.push({ application: { $in: [req.query.application] } });
+      if (req.query.applicationsList && excludeField !== "applicationsList") {
+        clauses.push({ applicationsList: { $in: [req.query.applicationsList] } });
       }
 
       if (req.query.isActive !== undefined) {
@@ -845,11 +892,11 @@ const listProducts = async (req, res) => {
       subcategory: buildFacetFilter("subcategoryId"),
       pattern: buildFacetFilter("pattern"),
       tireType: buildFacetFilter("tireType"),
-      vehicleType: buildFacetFilter("vehicleType"),
-      application: buildFacetFilter("application"),
+      vehicleTypesList: buildFacetFilter("vehicleTypesList"),
+      applicationsList: buildFacetFilter("applicationsList"),
     };
 
-    const [products, total, allCategories, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes, tireTypes, vehicleTypes, applications, tireSizes] = await Promise.all([
+    const [products, total, allCategories, brandsDirect, brandsFromAttributes, patternsDirect, patternsFromAttributes, tireTypes, vehicleTypesLists, applicationsLists, tireSizes] = await Promise.all([
       Product.find(filter).sort(sort).skip(skip).limit(limit).populate("category"),
       Product.countDocuments(filter),
       Category.find({ isActive: true }).select("name subcategories").lean(),
@@ -858,8 +905,8 @@ const listProducts = async (req, res) => {
       Product.distinct("pattern", facetFilters.pattern),
       Product.distinct("keyAttributes.Pattern", facetFilters.pattern),
       Product.distinct("tireType", facetFilters.tireType),
-      Product.distinct("vehicleType", facetFilters.vehicleType),
-      Product.distinct("application", facetFilters.application),
+      Product.distinct("vehicleTypesList", facetFilters.vehicleTypesList),
+      Product.distinct("applicationsList", facetFilters.applicationsList),
       Product.distinct("tireSpecs.size", facetFilters.tireType),
     ]);
 
@@ -923,8 +970,8 @@ const listProducts = async (req, res) => {
         brands,
         patterns,
         tireTypes: tireTypes.filter(t => t),
-        vehicleTypes: vehicleTypes.flat().filter(v => v),
-        applications: applications.flat().filter(a => a),
+        vehicleTypesLists: vehicleTypesLists.flat().filter(v => v),
+        applicationsLists: applicationsLists.flat().filter(a => a),
         tireSizes: tireSizeList,
       },
     });
@@ -932,6 +979,7 @@ const listProducts = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+ 
 
 const getProduct = async (req, res) => {
   try {
@@ -940,8 +988,29 @@ const getProduct = async (req, res) => {
       return res.status(404).json({ success: false, message: "Product not found" });
     }
 
-    res.json({ success: true, product: mapProduct(product) });
+    // Debug log - দেখুন ডাটাবেস থেকে কি আসছে
+    console.log('Raw Product from DB:', {
+      id: product._id,
+      name: product.name,
+      tireType: product.tireType,
+      vehicleTypesList: product.vehicleTypesList,
+      applicationsList: product.applicationsList,
+      tireSpecs: product.tireSpecs
+    });
+
+    const mappedProduct = mapProduct(product);
+    
+    // Debug log - ম্যাপ করার পর কি হচ্ছে
+    console.log('Mapped Product:', {
+      tireType: mappedProduct.tireType,
+      vehicleType: mappedProduct.vehicleType,
+      application: mappedProduct.application,
+      tireSpecs: mappedProduct.tireSpecs
+    });
+
+    res.json({ success: true, product: mappedProduct });
   } catch (error) {
+    console.error('Get product error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -1020,13 +1089,13 @@ const deleteProduct = async (req, res) => {
 
 const getRecommendationReason = (tire, criteria) => {
   const reasons = [];
-  if (criteria.roadType === 'highway' && tire.application?.includes('highway')) {
+  if (criteria.roadType === 'highway' && tire.applicationsList?.includes('highway')) {
     reasons.push('Optimized for highway fuel efficiency');
   }
-  if (criteria.roadType === 'mixed' && tire.application?.includes('mixed-service')) {
+  if (criteria.roadType === 'mixed' && tire.applicationsList?.includes('mixed-service')) {
     reasons.push('Designed for mixed on/off-road conditions');
   }
-  if (criteria.roadType === 'off-road' && (tire.application?.includes('off-road') || tire.application?.includes('mining'))) {
+  if (criteria.roadType === 'off-road' && (tire.applicationsList?.includes('off-road') || tire.applicationsList?.includes('mining'))) {
     reasons.push('Heavy-duty off-road construction for maximum durability');
   }
   if (criteria.loadWeight === 'heavy' && tire.tireSpecs?.loadIndex >= 150) {
@@ -1035,8 +1104,8 @@ const getRecommendationReason = (tire, criteria) => {
   if (criteria.loadWeight === 'light' && tire.tireSpecs?.loadIndex < 140) {
     reasons.push('Light load rating matches your fleet needs');
   }
-  if (criteria.vehicleType === 'truck' && tire.vehicleType?.includes('truck')) {
-    reasons.push('Specifically designed for truck applications');
+  if (criteria.vehicleTypesList === 'truck' && tire.vehicleTypesList?.includes('truck')) {
+    reasons.push('Specifically designed for truck applicationsLists');
   }
   return reasons.join('. ') || 'Recommended based on your criteria';
 };
@@ -1044,25 +1113,25 @@ const getRecommendationReason = (tire, criteria) => {
 const findTiresByCriteria = async (req, res) => {
   try {
     const {
-      vehicleType,
+      vehicleTypesList,
       roadType,
       loadWeight,
       tireSize,
-      application
+      applicationsList
     } = req.query;
 
     const filter = { isActive: true };
     
-    if (vehicleType) {
-      filter.vehicleType = { $in: [vehicleType] };
+    if (vehicleTypesList) {
+      filter.vehicleTypesList = { $in: [vehicleTypesList] };
     }
     
     if (roadType === 'highway') {
-      filter.application = { $in: ['highway', 'regional'] };
+      filter.applicationsList = { $in: ['highway', 'regional'] };
     } else if (roadType === 'mixed') {
-      filter.application = { $in: ['mixed-service', 'regional'] };
+      filter.applicationsList = { $in: ['mixed-service', 'regional'] };
     } else if (roadType === 'off-road') {
-      filter.application = { $in: ['off-road', 'mining', 'construction'] };
+      filter.applicationsList = { $in: ['off-road', 'mining', 'construction'] };
     }
     
     if (loadWeight === 'heavy') {
@@ -1075,8 +1144,8 @@ const findTiresByCriteria = async (req, res) => {
       filter['tireSpecs.size'] = { $regex: tireSize, $options: 'i' };
     }
     
-    if (application) {
-      filter.application = { $in: [application] };
+    if (applicationsList) {
+      filter.applicationsList = { $in: [applicationsList] };
     }
     
     const recommendedTires = await Product.find(filter)
@@ -1085,12 +1154,12 @@ const findTiresByCriteria = async (req, res) => {
     
     const results = recommendedTires.map(tire => ({
       ...mapProduct(tire),
-      recommendationReason: getRecommendationReason(tire, { vehicleType, roadType, loadWeight })
+      recommendationReason: getRecommendationReason(tire, { vehicleTypesList, roadType, loadWeight })
     }));
     
     res.json({
       success: true,
-      criteria: { vehicleType, roadType, loadWeight, tireSize, application },
+      criteria: { vehicleTypesList, roadType, loadWeight, tireSize, applicationsList },
       recommendations: results,
       total: results.length
     });
@@ -1152,8 +1221,8 @@ const compareTires = async (req, res) => {
       },
       classification: {
         tireType: tire.tireType,
-        vehicleType: tire.vehicleType,
-        application: tire.application
+        vehicleTypesList: tire.vehicleTypesList,
+        applicationsList: tire.applicationsList
       },
       features: {
         description: tire.shortDescription || tire.description?.substring(0, 200),
@@ -1216,7 +1285,7 @@ const createB2BInquiry = async (req, res) => {
         tireModel: product?.name || item.tireModel,
         tireSize: product?.tireSpecs?.size || item.tireSize,
         quantity: item.quantity,
-        application: item.application,
+        applicationsList: item.applicationsList,
         specialRequirements: item.specialRequirements
       };
     });

@@ -60,27 +60,27 @@ const normalizeSourceId = (value) => {
 const normalizePricingTiers = (tiers = []) =>
   Array.isArray(tiers)
     ? tiers.map((tier) => ({
-        minQuantity: tier?.minQuantity === null ? null : normalizeNumber(tier?.minQuantity ?? tier?.min ?? 0),
-        maxQuantity:
-          tier?.maxQuantity === null || tier?.max === null
-            ? null
-            : normalizeNumber(tier?.maxQuantity ?? tier?.max ?? 0),
-        pricePerTire: tier?.pricePerTire ? String(tier.pricePerTire) : tier?.price ? String(tier.price) : "",
-        note: tier?.note ? String(tier.note) : "",
-      }))
+      minQuantity: tier?.minQuantity === null ? null : normalizeNumber(tier?.minQuantity ?? tier?.min ?? 0),
+      maxQuantity:
+        tier?.maxQuantity === null || tier?.max === null
+          ? null
+          : normalizeNumber(tier?.maxQuantity ?? tier?.max ?? 0),
+      pricePerTire: tier?.pricePerTire ? String(tier.pricePerTire) : tier?.price ? String(tier.price) : "",
+      note: tier?.note ? String(tier.note) : "",
+    }))
     : [];
 
 const normalizeReviews = (reviews = []) =>
   Array.isArray(reviews)
     ? reviews.map((review) => ({
-        username: review?.username ? String(review.username) : review?.author ? String(review.author) : "",
-        location: review?.location ? String(review.location) : "",
-        rating: normalizeNumber(review?.rating ?? 0),
-        date: review?.date ? String(review.date) : "",
-        title: review?.title ? String(review.title) : "",
-        text: review?.text ? String(review.text) : review?.comment ? String(review.comment) : "",
-        verified: review?.verified === undefined ? false : Boolean(review.verified),
-      }))
+      username: review?.username ? String(review.username) : review?.author ? String(review.author) : "",
+      location: review?.location ? String(review.location) : "",
+      rating: normalizeNumber(review?.rating ?? 0),
+      date: review?.date ? String(review.date) : "",
+      title: review?.title ? String(review.title) : "",
+      text: review?.text ? String(review.text) : review?.comment ? String(review.comment) : "",
+      verified: review?.verified === undefined ? false : Boolean(review.verified),
+    }))
     : [];
 
 const normalizeAsset = (asset = {}) => {
@@ -200,7 +200,6 @@ const normalizeProductPayload = (payload = {}) => {
   return {
     ...(resolvedSourceId !== undefined ? { sourceId: resolvedSourceId } : {}),
     name: String(payload.name || "").trim(),
-    slug: String(payload.slug || slugifyText(payload.name)).trim(),
     sku: String(payload.sku || "").trim(),
     category: payload.category,
     mainCategory: String(payload.mainCategory || payload.categoryName || "").trim(),
@@ -231,18 +230,18 @@ const normalizeProductPayload = (payload = {}) => {
     isNewArrival: Boolean(payload.isNewArrival),
     isBestSeller: Boolean(payload.isBestSeller),
     metadata: payload.metadata || {},
-    
+
     // Tire-specific fields - FIXED
     tireType: getPrimaryValue(payload.tireType, 'all-position'),
-    
+
     // Store both as array and string
     vehicleTypesList: getArrayValue(payload.vehicleTypesList || payload.vehicleType, ['truck']),
     applicationsList: getArrayValue(payload.applicationsList || payload.application, ['highway']),
-    
+
     // Primary/single values
     primaryVehicleType: getPrimaryValue(payload.primaryVehicleType || payload.vehicleType, 'truck'),
     primaryApplication: getPrimaryValue(payload.primaryApplication || payload.application, 'highway'),
-    
+
     tireSpecs: payload.tireSpecs || {},
     resources: payload.resources || {},
     videoUrl: String(payload.videoUrl || "").trim(),
@@ -251,30 +250,11 @@ const normalizeProductPayload = (payload = {}) => {
 };
 
 const resolveExistingProductForImport = async (productPayload) => {
-  const slug = String(productPayload.slug || "").trim();
   const sourceId = productPayload.sourceId;
-
-  if (slug) {
-    const existingBySlug = await Product.findOne({ slug });
-    if (existingBySlug) {
-      if (
-        sourceId !== undefined
-        && existingBySlug.sourceId !== undefined
-        && Number(existingBySlug.sourceId) !== Number(sourceId)
-      ) {
-        delete productPayload.sourceId;
-      }
-      return existingBySlug;
-    }
-  }
 
   if (sourceId !== undefined) {
     const existingBySource = await Product.findOne({ sourceId });
     if (existingBySource) {
-      if (slug && existingBySource.slug && existingBySource.slug !== slug) {
-        delete productPayload.sourceId;
-        return null;
-      }
       return existingBySource;
     }
   }
@@ -306,7 +286,7 @@ const normalizeSubcategories = (subcategories) => {
       }
 
       const name = String(subcategory.name || subcategory.title || "").trim();
-      
+
       if (!name) {
         return null;
       }
@@ -366,18 +346,17 @@ const mapCategory = (category) => ({
   createdAt: category.createdAt,
   updatedAt: category.updatedAt,
 });
- 
+
 // catalogController.js - mapProduct function সম্পূর্ণ আপডেট
 
 const mapProduct = (product) => {
   // Ensure product is a Mongoose document with toObject
   const productData = product.toObject ? product.toObject() : product;
-  
+
   return {
     id: productData._id,
     sourceId: productData.sourceId,
     name: productData.name || "",
-    slug: productData.slug || "",
     sku: productData.sku || "",
     category: productData.category?._id || productData.category,
     categoryName: productData.categoryName || "",
@@ -408,29 +387,26 @@ const mapProduct = (product) => {
     metadata: productData.metadata || {},
     createdAt: productData.createdAt,
     updatedAt: productData.updatedAt,
-    
-    // ========== টায়ার স্পেসিফিকেশন - এখানে মনযোগ দিন ==========
-    
-    // Tire Type - সিঙ্গেল স্ট্রিং
+
+    // ========== TIRE SPECIFICATIONS ==========
+    // Tire Type - Single string
     tireType: productData.tireType || "",
-    
-    // Vehicle Types - অ্যারে ফরম্যাটে
-    vehicleType: Array.isArray(productData.vehicleTypesList) ? productData.vehicleTypesList : 
-                 (productData.vehicleTypesListsList ? productData.vehicleTypesListsList : []),
-    
-    // Applications - অ্যারে ফরম্যাটে  
-    application: Array.isArray(productData.applicationsList) ? productData.applicationsList :
-                 (productData.applicationsListsList ? productData.applicationsListsList : []),
-    
-    // Primary values (সিঙ্গেল ভ্যালু)
-    primaryVehicleType: productData.primaryvehicleTypesList || productData.primaryVehicleType || "",
-    primaryApplication: productData.primaryapplicationsList || productData.primaryApplication || "",
-    
-    // Raw arrays (ব্যাকওয়ার্ড কম্প্যাটিবিলিটির জন্য)
+
+    // Vehicle Types - Array format
+    vehicleType: Array.isArray(productData.vehicleTypesList) ? productData.vehicleTypesList : [],
+
+    // Applications - Array format
+    application: Array.isArray(productData.applicationsList) ? productData.applicationsList : [],
+
+    // Primary values (Single value)
+    primaryVehicleType: productData.primaryVehicleType || "",
+    primaryApplication: productData.primaryApplication || "",
+
+    // Raw arrays (for backward compatibility)
     vehicleTypesList: Array.isArray(productData.vehicleTypesList) ? productData.vehicleTypesList : [],
     applicationsList: Array.isArray(productData.applicationsList) ? productData.applicationsList : [],
-    
-    // ========== টায়ার স্পেসিফিকেশন ডিটেইলস ==========
+
+    // ========== TIRE SPECIFICATIONS DETAILS ==========
     tireSpecs: {
       size: productData.tireSpecs?.size || "",
       loadIndex: productData.tireSpecs?.loadIndex || "",
@@ -454,7 +430,7 @@ const mapProduct = (product) => {
       weightUnit: productData.tireSpecs?.weightUnit || "lbs",
       revsPerKm: productData.tireSpecs?.revsPerKm || "",
     },
-    
+
     resources: productData.resources || {},
     videoUrl: productData.videoUrl || "",
     threeSixtyImages: productData.threeSixtyImages || [],
@@ -560,13 +536,13 @@ const syncProductCategoryFields = async (productPayload) => {
   const category = candidateCategoryId
     ? await Category.findById(candidateCategoryId)
     : await Category.findOne({
-        $or: [
-          { name: productPayload.mainCategory },
-          { slug: slugifyText(productPayload.mainCategory) },
-          { name: productPayload.categoryName },
-          { slug: slugifyText(productPayload.categoryName) },
-        ],
-      });
+      $or: [
+        { name: productPayload.mainCategory },
+        { slug: slugifyText(productPayload.mainCategory) },
+        { name: productPayload.categoryName },
+        { slug: slugifyText(productPayload.categoryName) },
+      ],
+    });
 
   if (!category) return productPayload;
 
@@ -601,7 +577,7 @@ const findProductByRouteId = async (routeId, { populate = false } = {}) => {
 
   let query = Product.findOne(candidates.length === 1 ? candidates[0] : { $or: candidates });
   if (populate) query = query.populate("category");
-  return query;
+  return await query.exec();
 };
 
 const uploadBufferToCloudinary = (buffer, filename) =>
@@ -680,10 +656,10 @@ const listCategories = async (req, res) => {
       sortBy === "main-desc"
         ? { name: -1 }
         : sortBy === "sub-asc"
-        ? { subcategoryCount: 1, name: 1 }
-        : sortBy === "sub-desc"
-        ? { subcategoryCount: -1, name: 1 }
-        : { name: 1 };
+          ? { subcategoryCount: 1, name: 1 }
+          : sortBy === "sub-desc"
+            ? { subcategoryCount: -1, name: 1 }
+            : { name: 1 };
 
     if (!paginate) {
       const categories = await Category.aggregate([
@@ -737,7 +713,7 @@ const listCategories = async (req, res) => {
 const createCategory = async (req, res) => {
   try {
     const payload = normalizeCategoryPayload(req.body);
-    
+
     if (!payload.name) {
       return res.status(400).json({ success: false, message: "Category name is required" });
     }
@@ -772,11 +748,11 @@ const updateCategory = async (req, res) => {
     category.displayOrder = payload.displayOrder;
     category.isActive = payload.isActive;
     category.image = payload.image;
-    
+
     if (req.body.subcategories !== undefined) {
       category.subcategories = payload.subcategories;
     }
-    
+
     category.metadata = payload.metadata;
 
     await category.save();
@@ -979,7 +955,7 @@ const listProducts = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
- 
+
 
 const getProduct = async (req, res) => {
   try {
@@ -999,7 +975,7 @@ const getProduct = async (req, res) => {
     });
 
     const mappedProduct = mapProduct(product);
-    
+
     // Debug log - ম্যাপ করার পর কি হচ্ছে
     console.log('Mapped Product:', {
       tireType: mappedProduct.tireType,
@@ -1042,13 +1018,13 @@ const updateProduct = async (req, res) => {
     }
 
     const payload = await syncProductCategoryFields(normalizeProductPayload(req.body));
-    
+
     const wasFeatured = product.isFeatured;
     const willBeFeatured = payload.isFeatured;
-    
+
     Object.assign(product, payload);
     await product.save();
-    
+
     if (willBeFeatured && !wasFeatured) {
       const FeaturedProduct = require("../models/FeaturedProduct");
       const existing = await FeaturedProduct.findOne({ productId: product._id });
@@ -1121,11 +1097,11 @@ const findTiresByCriteria = async (req, res) => {
     } = req.query;
 
     const filter = { isActive: true };
-    
+
     if (vehicleTypesList) {
       filter.vehicleTypesList = { $in: [vehicleTypesList] };
     }
-    
+
     if (roadType === 'highway') {
       filter.applicationsList = { $in: ['highway', 'regional'] };
     } else if (roadType === 'mixed') {
@@ -1133,30 +1109,30 @@ const findTiresByCriteria = async (req, res) => {
     } else if (roadType === 'off-road') {
       filter.applicationsList = { $in: ['off-road', 'mining', 'construction'] };
     }
-    
+
     if (loadWeight === 'heavy') {
       filter['tireSpecs.loadIndex'] = { $gte: '150' };
     } else if (loadWeight === 'medium') {
       filter['tireSpecs.loadIndex'] = { $gte: '140', $lte: '149' };
     }
-    
+
     if (tireSize) {
       filter['tireSpecs.size'] = { $regex: tireSize, $options: 'i' };
     }
-    
+
     if (applicationsList) {
       filter.applicationsList = { $in: [applicationsList] };
     }
-    
+
     const recommendedTires = await Product.find(filter)
       .limit(10)
       .populate('category');
-    
+
     const results = recommendedTires.map(tire => ({
       ...mapProduct(tire),
       recommendationReason: getRecommendationReason(tire, { vehicleTypesList, roadType, loadWeight })
     }));
-    
+
     res.json({
       success: true,
       criteria: { vehicleTypesList, roadType, loadWeight, tireSize, applicationsList },
@@ -1173,33 +1149,33 @@ const findTiresByCriteria = async (req, res) => {
 const compareTires = async (req, res) => {
   try {
     const { productIds } = req.body;
-    
+
     if (!productIds || !Array.isArray(productIds) || productIds.length < 2) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "At least 2 tire models required for comparison" 
+      return res.status(400).json({
+        success: false,
+        message: "At least 2 tire models required for comparison"
       });
     }
-    
+
     if (productIds.length > 4) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Maximum 4 tires can be compared at once" 
+      return res.status(400).json({
+        success: false,
+        message: "Maximum 4 tires can be compared at once"
       });
     }
-    
-    const tires = await Product.find({ 
+
+    const tires = await Product.find({
       _id: { $in: productIds },
-      isActive: true 
+      isActive: true
     }).populate('category');
-    
+
     if (tires.length !== productIds.length) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Some tire models not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Some tire models not found"
       });
     }
-    
+
     const comparisonData = tires.map(tire => ({
       id: tire._id,
       name: tire.name,
@@ -1230,7 +1206,7 @@ const compareTires = async (req, res) => {
         datasheet: tire.resources?.datasheet?.url
       }
     }));
-    
+
     res.json({
       success: true,
       comparison: comparisonData
@@ -1245,7 +1221,7 @@ const compareTires = async (req, res) => {
 const createB2BInquiry = async (req, res) => {
   try {
     const Inquiry = require("../models/Inquiry");
-    
+
     const {
       companyName,
       companyType,
@@ -1263,21 +1239,21 @@ const createB2BInquiry = async (req, res) => {
       expectedDeliveryDate,
       priority
     } = req.body;
-    
+
     // Validation
     if (!companyName || !contactPerson || !email || !phone || !items || items.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Missing required fields: companyName, contactPerson, email, phone, and at least one item" 
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: companyName, contactPerson, email, phone, and at least one item"
       });
     }
-    
+
     const inquiryNumber = `INQ-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    
+
     const productIds = items.map(item => item.productId).filter(id => id);
     const products = productIds.length ? await Product.find({ _id: { $in: productIds } }) : [];
     const productMap = new Map(products.map(p => [p._id.toString(), p]));
-    
+
     const inquiryItems = items.map(item => {
       const product = item.productId ? productMap.get(item.productId) : null;
       return {
@@ -1289,7 +1265,7 @@ const createB2BInquiry = async (req, res) => {
         specialRequirements: item.specialRequirements
       };
     });
-    
+
     const inquiry = await Inquiry.create({
       inquiryNumber,
       customer: req.authUser?._id || null,
@@ -1313,7 +1289,7 @@ const createB2BInquiry = async (req, res) => {
       expectedDeliveryDate: expectedDeliveryDate ? new Date(expectedDeliveryDate) : null,
       contactChannel: preferredContactMethod || 'email'
     });
-    
+
     res.status(201).json({
       success: true,
       message: "Inquiry submitted successfully",
@@ -1332,14 +1308,14 @@ const findNearbyDealers = async (req, res) => {
   try {
     const Dealer = require("../models/Dealer");
     const { lat, lng, maxDistance = 50000, country, city, search } = req.query;
-    
+
     let filter = { isActive: true, isAuthorized: true };
-    
+
     if (country) filter['address.country'] = { $regex: country, $options: 'i' };
     if (city) filter['address.city'] = { $regex: city, $options: 'i' };
-    
+
     let dealers;
-    
+
     if (lat && lng) {
       dealers = await Dealer.find({
         ...filter,
@@ -1361,19 +1337,19 @@ const findNearbyDealers = async (req, res) => {
     } else {
       dealers = await Dealer.find(filter).limit(20);
     }
-    
+
     const calculateDistance = (lat1, lon1, lat2, lon2) => {
       if (!lat1 || !lon1) return null;
       const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
       const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       return Math.round(R * c * 10) / 10;
     };
-    
+
     res.json({
       success: true,
       dealers: dealers.map(dealer => ({
@@ -1389,9 +1365,9 @@ const findNearbyDealers = async (req, res) => {
         isAuthorized: dealer.isAuthorized,
         certifications: dealer.certifications,
         specialties: dealer.specialties,
-        distance: (lat && lng && dealer.address.location?.coordinates) ? 
-          calculateDistance(parseFloat(lat), parseFloat(lng), 
-            dealer.address.location.coordinates[1], 
+        distance: (lat && lng && dealer.address.location?.coordinates) ?
+          calculateDistance(parseFloat(lat), parseFloat(lng),
+            dealer.address.location.coordinates[1],
             dealer.address.location.coordinates[0]) : null
       }))
     });
@@ -1410,12 +1386,12 @@ const listMedia = async (req, res) => {
     const { page, limit, skip } = buildPaging(req.query, { defaultLimit: 24, maxLimit: 200 });
     const filter = search
       ? {
-          $or: [
-            { originalFilename: { $regex: search, $options: "i" } },
-            { publicId: { $regex: search, $options: "i" } },
-            { folder: { $regex: search, $options: "i" } },
-          ],
-        }
+        $or: [
+          { originalFilename: { $regex: search, $options: "i" } },
+          { publicId: { $regex: search, $options: "i" } },
+          { folder: { $regex: search, $options: "i" } },
+        ],
+      }
       : {};
 
     if (!paginate) {

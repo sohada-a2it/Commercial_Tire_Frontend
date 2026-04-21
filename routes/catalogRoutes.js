@@ -35,11 +35,12 @@ router.post("/categories/import", authenticate, requireAdmin, importCatalogFromJ
 // Admin/Staff routes
 router.get("/products", listProducts);
 router.post("/products", authenticate, requireStaff, createProduct);
+router.get("/products/:productId", authenticate, requireStaff, getProduct);
 router.put("/products/:productId", authenticate, requireStaff, updateProduct);
 router.delete("/products/:productId", authenticate, requireAdmin, deleteProduct);
 
-// ========== ADD THIS PUBLIC ROUTE ==========
-router.get("/public/products/:productId", getProduct);  // <-- ADD THIS LINE
+// ========== PUBLIC ROUTE ==========
+router.get("/public/products/:productId", getProduct);
 
 // ==================== TIRE FINDER & COMPARISON (Public Routes) ====================
 router.get("/tires/finder", findTiresByCriteria);

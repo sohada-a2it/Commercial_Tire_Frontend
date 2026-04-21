@@ -141,19 +141,12 @@ const productSchema = new mongoose.Schema(
     sourceId: { type: Number, unique: true, sparse: true, index: true },
     
     // Basic Info
-    name: { type: String, required: true, trim: true },
-    slug: { type: String, required: true, unique: true, trim: true, index: true },
-    sku: { type: String, trim: true, default: "" },
-    
+    name: { type: String, required: true, trim: true }, 
+    modelNumber: { type: String, trim: true, default: "" },
     // Categorization
     category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true, index: true },
-    mainCategory: { type: String, trim: true, default: "" },
-    subCategory: { type: String, trim: true, default: "" },
-    categoryName: { type: String, trim: true, default: "" },
-    categoryIcon: { type: String, trim: true, default: "" },
-    subcategoryId: { type: Number, default: 0 },
-    subcategoryName: { type: String, trim: true, default: "" },
-    subcategorySlug: { type: String, trim: true, default: "" },
+    mainCategory: { type: String, trim: true, default: "" }, 
+    categoryName: { type: String, trim: true, default: "" },   
     
     // Tire Classification - HYBRID APPROACH
     // Single string for efficient indexing (used for main filtering)

@@ -19,6 +19,13 @@ const {
   compareTires,
   createB2BInquiry,
   findNearbyDealers,
+  getProductDetails,
+  getProductQuickView,
+  getProductSpecsTable,
+  getProductReviews,
+  getProductPricing,
+  getProductSEO,
+  submitProductReview
 } = require("../controllers/catalogController");
 const { authenticate, requireAdmin, requireStaff } = require("../middleware/auth");
 
@@ -32,6 +39,20 @@ router.delete("/categories/:categoryId", authenticate, requireAdmin, deleteCateg
 router.post("/categories/import", authenticate, requireAdmin, importCatalogFromJson);
 
 // ==================== PRODUCT ROUTES ====================
+// আপনার রাউটার ফাইলে এই রুটগুলো যোগ করুন
+
+// ==================== PRODUCT DETAILS ROUTES ====================
+
+// Public routes (no authentication required)
+router.get('/products/:productId/details', getProductDetails);
+router.get('/products/:productId/quick-view', getProductQuickView);
+router.get('/products/:productId/specs', getProductSpecsTable);
+router.get('/products/:productId/reviews', getProductReviews);
+router.get('/products/:productId/pricing', getProductPricing);
+router.get('/products/:productId/seo', getProductSEO);
+
+// Protected routes (authentication required)
+router.post('/products/:productId/reviews', authenticate, requireAdmin, submitProductReview);
 // Admin/Staff routes
 router.get("/products", listProducts);
 router.post("/products", authenticate, requireStaff, createProduct);

@@ -175,7 +175,7 @@ const upsertImportedMediaAsset = async ({
 const normalizeProductPayload = (payload = {}) => {
   const resolvedSourceId = normalizeSourceId(payload.sourceId ?? payload.id);
 
-  // Helper to get primary value from array or string
+  // Helper functions
   const getPrimaryValue = (value, defaultValue) => {
     if (Array.isArray(value) && value.length > 0) {
       return String(value[0]).trim();
@@ -186,7 +186,6 @@ const normalizeProductPayload = (payload = {}) => {
     return defaultValue;
   };
 
-  // Helper to get array from value
   const getArrayValue = (value, defaultValue) => {
     if (Array.isArray(value)) {
       return value.filter(v => v).map(v => String(v).trim());
@@ -201,6 +200,10 @@ const normalizeProductPayload = (payload = {}) => {
     ...(resolvedSourceId !== undefined ? { sourceId: resolvedSourceId } : {}),
     name: String(payload.name || "").trim(),
     sku: String(payload.sku || "").trim(),
+
+    // ✅ ADD THIS - Model Number
+    modelNumber: String(payload.modelNumber || "").trim(),
+
     category: payload.category,
     mainCategory: String(payload.mainCategory || payload.categoryName || "").trim(),
     subCategory: String(payload.subCategory || payload.subcategoryName || "").trim(),
@@ -231,14 +234,10 @@ const normalizeProductPayload = (payload = {}) => {
     isBestSeller: Boolean(payload.isBestSeller),
     metadata: payload.metadata || {},
 
-    // Tire-specific fields - FIXED
+    // Tire-specific fields
     tireType: getPrimaryValue(payload.tireType, 'all-position'),
-
-    // Store both as array and string
     vehicleTypesList: getArrayValue(payload.vehicleTypesList || payload.vehicleType, ['truck']),
     applicationsList: getArrayValue(payload.applicationsList || payload.application, ['highway']),
-
-    // Primary/single values
     primaryVehicleType: getPrimaryValue(payload.primaryVehicleType || payload.vehicleType, 'truck'),
     primaryApplication: getPrimaryValue(payload.primaryApplication || payload.application, 'highway'),
 
@@ -350,7 +349,6 @@ const mapCategory = (category) => ({
 // catalogController.js - mapProduct function সম্পূর্ণ আপডেট
 
 const mapProduct = (product) => {
-  // Ensure product is a Mongoose document with toObject
   const productData = product.toObject ? product.toObject() : product;
 
   return {
@@ -358,6 +356,10 @@ const mapProduct = (product) => {
     sourceId: productData.sourceId,
     name: productData.name || "",
     sku: productData.sku || "",
+
+    // ✅ ADD THIS - Model Number
+    modelNumber: productData.modelNumber || "",
+
     category: productData.category?._id || productData.category,
     categoryName: productData.categoryName || "",
     categoryIcon: productData.categoryIcon || "",
@@ -388,25 +390,15 @@ const mapProduct = (product) => {
     createdAt: productData.createdAt,
     updatedAt: productData.updatedAt,
 
-    // ========== TIRE SPECIFICATIONS ==========
-    // Tire Type - Single string
+    // Tire specifications
     tireType: productData.tireType || "",
-
-    // Vehicle Types - Array format
     vehicleType: Array.isArray(productData.vehicleTypesList) ? productData.vehicleTypesList : [],
-
-    // Applications - Array format
     application: Array.isArray(productData.applicationsList) ? productData.applicationsList : [],
-
-    // Primary values (Single value)
     primaryVehicleType: productData.primaryVehicleType || "",
     primaryApplication: productData.primaryApplication || "",
-
-    // Raw arrays (for backward compatibility)
     vehicleTypesList: Array.isArray(productData.vehicleTypesList) ? productData.vehicleTypesList : [],
     applicationsList: Array.isArray(productData.applicationsList) ? productData.applicationsList : [],
 
-    // ========== TIRE SPECIFICATIONS DETAILS ==========
     tireSpecs: {
       size: productData.tireSpecs?.size || "",
       loadIndex: productData.tireSpecs?.loadIndex || "",
@@ -1731,7 +1723,847 @@ const importCatalogFromJson = async (_req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+/**
+ * Get complete product details for public view with all specifications
+ * GET /api/products/:productId/details
+ */
+const getProductDetails = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { includeRelated = 'true', limit = 6 } = req.query;
 
+    // Find product with population
+    const product = await findProductByRouteId(productId, { populate: true });
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    // Check if product is active for public view
+    if (!product.isActive && !req.authUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not available"
+      });
+    }
+
+    // Get specifications
+    const specifications = getProductSpecifications(product);
+
+    // Get features
+    const features = getProductFeatures(product);
+
+    // Get tire classification details
+    const tireClassification = {
+      tireType: product.tireType,
+      vehicleTypes: product.vehicleTypesList || [],
+      applications: product.applicationsList || [],
+      primaryVehicleType: product.primaryVehicleType,
+      primaryApplication: product.primaryApplication
+    };
+
+    // Calculate ratings
+    const reviews = product.userReviews || [];
+    const averageRating = calculateAverageRating(reviews);
+    const ratingDistribution = getRatingDistribution(reviews);
+    const totalReviews = reviews.length;
+    const verifiedReviews = reviews.filter(r => r.verified);
+
+    // Get pricing information
+    const pricing = {
+      regularPrice: product.price,
+      offerPrice: product.offerPrice,
+      discountPercentage: calculateDiscountPercentage(product.price, product.offerPrice),
+      pricingTiers: product.pricingTiers || [],
+      hasVolumeDiscount: (product.pricingTiers || []).length > 0
+    };
+
+    // Get related products
+    let relatedProducts = [];
+    if (includeRelated === 'true') {
+      relatedProducts = await getRelatedProducts(product, parseInt(limit));
+    }
+
+    // Get similar products by size
+    const similarBySize = await getSimilarBySize(product, parseInt(limit));
+
+    // Prepare response
+    const response = {
+      success: true,
+      product: {
+        // Basic info
+        id: product._id,
+        sourceId: product.sourceId,
+        name: product.name,
+        modelNumber: product.modelNumber,
+        sku: product.sku,
+        brand: product.brand,
+        pattern: product.pattern,
+
+        // Descriptions
+        description: product.description,
+        shortDescription: product.shortDescription,
+
+        // Pricing
+        price: product.price,
+        offerPrice: product.offerPrice,
+        pricing,
+
+        // Media
+        image: product.image,
+        images: product.images,
+        videoUrl: product.videoUrl,
+        threeSixtyImages: product.threeSixtyImages,
+
+        // Downloads
+        resources: product.resources,
+
+        // Categories
+        category: product.category,
+        categoryName: product.categoryName,
+        subcategoryName: product.subcategoryName,
+
+        // Tire classification
+        tireType: product.tireType,
+        vehicleType: product.vehicleTypesList || [],
+        application: product.applicationsList || [],
+        primaryVehicleType: product.primaryVehicleType,
+        primaryApplication: product.primaryApplication,
+        tireClassification,
+
+        // Specifications and Features
+        specifications,
+        features,
+        tireSpecs: product.tireSpecs || {},
+        technicalSpecs: product.tireSpecs || {},
+
+        // Additional info
+        shipping: product.shipping,
+        customizationOptions: product.customizationOptions,
+        packagingAndDelivery: product.packagingAndDelivery,
+        tags: product.tags,
+
+        // Status
+        isNewArrival: product.isNewArrival,
+        isBestSeller: product.isBestSeller,
+        isActive: product.isActive,
+
+        // Reviews
+        reviews: {
+          average: averageRating,
+          total: totalReviews,
+          distribution: ratingDistribution,
+          verified: verifiedReviews.length,
+          list: reviews.slice(0, 5) // Last 5 reviews
+        },
+
+        // Timestamps
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt
+      },
+      relatedProducts: relatedProducts.map(p => ({
+        id: p._id,
+        name: p.name,
+        brand: p.brand,
+        pattern: p.pattern,
+        price: p.price,
+        offerPrice: p.offerPrice,
+        image: p.image,
+        tireSize: p.tireSpecs?.size
+      })),
+      similarBySize: similarBySize.map(p => ({
+        id: p._id,
+        name: p.name,
+        brand: p.brand,
+        price: p.price,
+        offerPrice: p.offerPrice,
+        image: p.image
+      }))
+    };
+
+    // Increment view count (optional)
+    await Product.findByIdAndUpdate(product._id, { $inc: { views: 1 } });
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('Get product details error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Get product specifications as key-value pairs
+ * @param {Object} product - Product document
+ * @returns {Array} Array of specification objects
+ */
+const getProductSpecifications = (product) => {
+  const specs = [];
+
+  // Basic specifications
+  if (product.brand) specs.push({ label: "Brand", value: product.brand });
+  if (product.pattern) specs.push({ label: "Pattern", value: product.pattern });
+  if (product.modelNumber) specs.push({ label: "Model Number", value: product.modelNumber });
+
+  // Tire specifications
+  const tireSpecs = product.tireSpecs || {};
+  if (tireSpecs.size) specs.push({ label: "Tire Size", value: tireSpecs.size });
+  if (tireSpecs.loadIndex) specs.push({ label: "Load Index", value: tireSpecs.loadIndex });
+  if (tireSpecs.speedRating) specs.push({ label: "Speed Rating", value: tireSpecs.speedRating });
+  if (tireSpecs.treadPattern) specs.push({ label: "Tread Pattern", value: tireSpecs.treadPattern });
+  if (tireSpecs.plyRating) specs.push({ label: "Ply Rating", value: tireSpecs.plyRating });
+  if (tireSpecs.loadRange) specs.push({ label: "Load Range", value: tireSpecs.loadRange });
+  if (tireSpecs.stdRim) specs.push({ label: "Standard Rim", value: tireSpecs.stdRim });
+  if (tireSpecs.overallDiameter) specs.push({ label: "Overall Diameter", value: tireSpecs.overallDiameter });
+  if (tireSpecs.sectionWidth) specs.push({ label: "Section Width", value: tireSpecs.sectionWidth });
+  if (tireSpecs.treadDepth) specs.push({ label: "Tread Depth", value: tireSpecs.treadDepth });
+  if (tireSpecs.maxLoad) specs.push({ label: "Max Load (Single)", value: tireSpecs.maxLoad });
+  if (tireSpecs.maxInflation) specs.push({ label: "Max Inflation Pressure", value: tireSpecs.maxInflation });
+  if (tireSpecs.constructionType) {
+    const constructionLabel = tireSpecs.constructionType === 'TL' ? 'Tubeless' :
+      tireSpecs.constructionType === 'TT' ? 'Tube Type' : 'Both';
+    specs.push({ label: "Construction", value: constructionLabel });
+  }
+
+  // Additional load specifications
+  if (tireSpecs.singleMaxLoad && tireSpecs.singleMaxPressure) {
+    specs.push({
+      label: "Single Configuration",
+      value: `${tireSpecs.singleMaxLoad} @ ${tireSpecs.singleMaxPressure} psi`
+    });
+  }
+
+  if (tireSpecs.dualMaxLoad && tireSpecs.dualMaxPressure) {
+    specs.push({
+      label: "Dual Configuration",
+      value: `${tireSpecs.dualMaxLoad} @ ${tireSpecs.dualMaxPressure} psi`
+    });
+  }
+
+  if (tireSpecs.staticLoadRadius) specs.push({
+    label: "Static Load Radius",
+    value: `${tireSpecs.staticLoadRadius}"`
+  });
+
+  if (tireSpecs.weight) specs.push({
+    label: "Weight",
+    value: `${tireSpecs.weight} ${tireSpecs.weightUnit || 'lbs'}`
+  });
+
+  if (tireSpecs.revsPerKm) specs.push({
+    label: "Revolutions per km",
+    value: tireSpecs.revsPerKm
+  });
+
+  return specs;
+};
+
+/**
+ * Get product features as array of strings
+ * @param {Object} product - Product document
+ * @returns {Array} Array of feature strings
+ */
+const getProductFeatures = (product) => {
+  const features = [];
+
+  // Tire type features
+  if (product.tireType) {
+    const tireTypeFeatures = {
+      'steer': 'Optimized for steering axles with excellent handling',
+      'drive': 'Maximum traction for drive axles with superior grip',
+      'trailer': 'Free-rolling design for trailers with low rolling resistance',
+      'all-position': 'Versatile tire suitable for any axle position',
+      'off-road': 'Heavy-duty construction for rough terrain durability',
+      'mining': 'Extreme durability for harsh mining operations'
+    };
+    if (tireTypeFeatures[product.tireType]) {
+      features.push(tireTypeFeatures[product.tireType]);
+    }
+  }
+
+  // Vehicle applications
+  if (product.vehicleTypesList && product.vehicleTypesList.length > 0) {
+    const vehicleLabels = {
+      'truck': 'Truck',
+      'bus': 'Bus',
+      'otr': 'Off-The-Road Equipment',
+      'industrial': 'Industrial Vehicles',
+      'mining': 'Mining Equipment',
+      'agricultural': 'Agricultural Vehicles'
+    };
+    const vehicles = product.vehicleTypesList.map(v => vehicleLabels[v] || v);
+    features.push(`Compatible with: ${vehicles.join(', ')}`);
+  }
+
+  // Road applications
+  if (product.applicationsList && product.applicationsList.length > 0) {
+    const appLabels = {
+      'highway': 'Highway/Long Haul - Fuel efficient',
+      'regional': 'Regional Distribution - Versatile performance',
+      'mixed-service': 'Mixed Service - On/Off road capability',
+      'off-road': 'Off-Road - Rough terrain optimized',
+      'mining': 'Mining - Extreme durability',
+      'port': 'Port/Container - High scrub resistance',
+      'construction': 'Construction - Puncture resistant'
+    };
+    const apps = product.applicationsList.map(app => appLabels[app] || app);
+    features.push(`Best for: ${apps.join(', ')}`);
+  }
+
+  // Key attributes as features
+  if (product.keyAttributes && typeof product.keyAttributes === 'object') {
+    const importantKeys = ['Material', 'Construction', 'Durability', 'Warranty', 'Certification'];
+    importantKeys.forEach(key => {
+      if (product.keyAttributes[key]) {
+        features.push(`${key}: ${product.keyAttributes[key]}`);
+      }
+    });
+  }
+
+  return features;
+};
+
+/**
+ * Calculate average rating from reviews
+ * @param {Array} reviews - Array of review objects
+ * @returns {number} Average rating (0-5)
+ */
+const calculateAverageRating = (reviews = []) => {
+  if (!reviews.length) return 0;
+  const sum = reviews.reduce((acc, review) => acc + (review.rating || 0), 0);
+  return parseFloat((sum / reviews.length).toFixed(1));
+};
+
+/**
+ * Get rating distribution (5 stars, 4 stars, etc.)
+ * @param {Array} reviews - Array of review objects
+ * @returns {Object} Rating distribution object
+ */
+const getRatingDistribution = (reviews = []) => {
+  const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  reviews.forEach(review => {
+    const rating = Math.floor(review.rating || 0);
+    if (rating >= 1 && rating <= 5) {
+      distribution[rating]++;
+    }
+  });
+  return distribution;
+};
+
+/**
+ * Calculate discount percentage
+ * @param {string} regularPrice - Regular price string
+ * @param {string} offerPrice - Offer price string
+ * @returns {number} Discount percentage
+ */
+const calculateDiscountPercentage = (regularPrice, offerPrice) => {
+  const regular = parseFloat(String(regularPrice || '0').replace(/[^0-9.-]/g, ''));
+  const offer = parseFloat(String(offerPrice || '0').replace(/[^0-9.-]/g, ''));
+
+  if (regular > 0 && offer > 0 && regular > offer) {
+    return Math.round(((regular - offer) / regular) * 100);
+  }
+  return 0;
+};
+
+/**
+ * Get related products based on category, tire type, and brand
+ * @param {Object} product - Product document
+ * @param {number} limit - Number of products to return
+ * @returns {Array} Array of related products
+ */
+const getRelatedProducts = async (product, limit = 6) => {
+  const criteria = [];
+
+  // Same category (highest priority)
+  if (product.category) {
+    criteria.push({ category: product.category });
+  }
+
+  // Same tire type
+  if (product.tireType) {
+    criteria.push({ tireType: product.tireType });
+  }
+
+  // Same brand
+  if (product.brand) {
+    criteria.push({ brand: product.brand });
+  }
+
+  // Same vehicle type
+  if (product.vehicleTypesList && product.vehicleTypesList.length > 0) {
+    criteria.push({ vehicleTypesList: { $in: product.vehicleTypesList } });
+  }
+
+  if (criteria.length === 0) {
+    return [];
+  }
+
+  const related = await Product.find({
+    _id: { $ne: product._id },
+    isActive: true,
+    $or: criteria
+  })
+    .limit(limit)
+    .select("name brand image price offerPrice pattern tireSpecs tireType")
+    .lean();
+
+  return related;
+};
+
+/**
+ * Get similar products by tire size
+ * @param {Object} product - Product document
+ * @param {number} limit - Number of products to return
+ * @returns {Array} Array of similar products
+ */
+const getSimilarBySize = async (product, limit = 4) => {
+  const tireSize = product.tireSpecs?.size;
+  if (!tireSize) return [];
+
+  const similar = await Product.find({
+    _id: { $ne: product._id },
+    isActive: true,
+    'tireSpecs.size': tireSize
+  })
+    .limit(limit)
+    .select("name brand image price offerPrice")
+    .lean();
+
+  return similar;
+};
+
+/**
+ * Get product quick view data (for modals/quick preview)
+ * GET /api/products/:productId/quick-view
+ */
+const getProductQuickView = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const product = await findProductByRouteId(productId);
+
+    if (!product || !product.isActive) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    // Calculate average rating
+    const reviews = product.userReviews || [];
+    const averageRating = calculateAverageRating(reviews);
+    const totalReviews = reviews.length;
+
+    // Calculate discount
+    const discount = calculateDiscountPercentage(product.price, product.offerPrice);
+
+    res.json({
+      success: true,
+      product: {
+        id: product._id,
+        name: product.name,
+        brand: product.brand,
+        pattern: product.pattern,
+        modelNumber: product.modelNumber,
+        price: product.price,
+        offerPrice: product.offerPrice,
+        discountPercentage: discount,
+        image: product.image,
+        shortDescription: product.shortDescription,
+        tireSize: product.tireSpecs?.size,
+        loadIndex: product.tireSpecs?.loadIndex,
+        speedRating: product.tireSpecs?.speedRating,
+        averageRating,
+        totalReviews,
+        inStock: product.isActive,
+        isNewArrival: product.isNewArrival,
+        isBestSeller: product.isBestSeller
+      }
+    });
+
+  } catch (error) {
+    console.error('Get product quick view error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Get product technical specifications table
+ * GET /api/products/:productId/specs
+ */
+const getProductSpecsTable = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const product = await findProductByRouteId(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    const specifications = getProductSpecifications(product);
+    const tireSpecs = product.tireSpecs || {};
+
+    // Group specifications by category
+    const groupedSpecs = {
+      basic: specifications.filter(s =>
+        ['Brand', 'Pattern', 'Model Number'].includes(s.label)
+      ),
+      dimensions: specifications.filter(s =>
+        ['Tire Size', 'Overall Diameter', 'Section Width', 'Standard Rim', 'Static Load Radius'].includes(s.label)
+      ),
+      performance: specifications.filter(s =>
+        ['Load Index', 'Speed Rating', 'Load Range', 'Ply Rating', 'Tread Depth', 'Revolutions per km'].includes(s.label)
+      ),
+      load: specifications.filter(s =>
+        ['Max Load (Single)', 'Max Inflation Pressure', 'Single Configuration', 'Dual Configuration', 'Max Load'].includes(s.label)
+      ),
+      construction: specifications.filter(s =>
+        ['Construction', 'Weight'].includes(s.label)
+      )
+    };
+
+    res.json({
+      success: true,
+      product: {
+        id: product._id,
+        name: product.name,
+        brand: product.brand
+      },
+      specifications: groupedSpecs,
+      rawSpecs: tireSpecs
+    });
+
+  } catch (error) {
+    console.error('Get product specs error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Get product reviews with pagination
+ * GET /api/products/:productId/reviews
+ */
+const getProductReviews = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { page = 1, limit = 10, rating } = req.query;
+
+    const product = await findProductByRouteId(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    let reviews = product.userReviews || [];
+
+    // Filter by rating
+    if (rating) {
+      reviews = reviews.filter(r => Math.floor(r.rating) === parseInt(rating));
+    }
+
+    // Sort by date (newest first)
+    reviews.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Paginate
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + parseInt(limit);
+    const paginatedReviews = reviews.slice(startIndex, endIndex);
+
+    // Calculate statistics
+    const averageRating = calculateAverageRating(reviews);
+    const ratingDistribution = getRatingDistribution(reviews);
+
+    res.json({
+      success: true,
+      reviews: paginatedReviews,
+      statistics: {
+        average: averageRating,
+        total: reviews.length,
+        distribution: ratingDistribution
+      },
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: reviews.length,
+        totalPages: Math.ceil(reviews.length / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get product reviews error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Submit a product review
+ * POST /api/products/:productId/reviews
+ */
+const submitProductReview = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { username, location, rating, title, text } = req.body;
+
+    // Validation
+    if (!username || !rating || !text) {
+      return res.status(400).json({
+        success: false,
+        message: "Username, rating, and review text are required"
+      });
+    }
+
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Rating must be between 1 and 5"
+      });
+    }
+
+    const product = await findProductByRouteId(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    const newReview = {
+      username: username.trim(),
+      location: location?.trim() || "",
+      rating: parseFloat(rating),
+      date: new Date().toISOString().split('T')[0],
+      title: title?.trim() || "",
+      text: text.trim(),
+      verified: false // Can be set to true if user is verified buyer
+    };
+
+    product.userReviews.push(newReview);
+    await product.save();
+
+    res.json({
+      success: true,
+      message: "Review submitted successfully",
+      review: newReview
+    });
+
+  } catch (error) {
+    console.error('Submit product review error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Get product availability and pricing tiers
+ * GET /api/products/:productId/pricing
+ */
+const getProductPricing = async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { quantity = 1 } = req.query;
+
+    const product = await findProductByRouteId(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    const regularPrice = parseFloat(String(product.price || '0').replace(/[^0-9.-]/g, ''));
+    const offerPrice = parseFloat(String(product.offerPrice || '0').replace(/[^0-9.-]/g, ''));
+    const basePrice = offerPrice > 0 ? offerPrice : regularPrice;
+
+    // Calculate price based on quantity
+    let calculatedPrice = basePrice;
+    let appliedTier = null;
+
+    if (product.pricingTiers && product.pricingTiers.length > 0) {
+      // Sort tiers by minQuantity
+      const sortedTiers = [...product.pricingTiers].sort((a, b) => a.minQuantity - b.minQuantity);
+
+      // Find applicable tier
+      for (const tier of sortedTiers) {
+        if (quantity >= tier.minQuantity && (tier.maxQuantity === null || quantity <= tier.maxQuantity)) {
+          const tierPrice = parseFloat(String(tier.pricePerTire || '0').replace(/[^0-9.-]/g, ''));
+          if (tierPrice > 0) {
+            calculatedPrice = tierPrice;
+            appliedTier = tier;
+          }
+          break;
+        }
+      }
+    }
+
+    const totalPrice = calculatedPrice * quantity;
+    const savings = basePrice > calculatedPrice ? (basePrice - calculatedPrice) * quantity : 0;
+    const savingsPercentage = basePrice > calculatedPrice ?
+      Math.round(((basePrice - calculatedPrice) / basePrice) * 100) : 0;
+
+    res.json({
+      success: true,
+      product: {
+        id: product._id,
+        name: product.name,
+        brand: product.brand
+      },
+      pricing: {
+        regularPrice,
+        offerPrice: offerPrice > 0 ? offerPrice : null,
+        basePrice,
+        requestedQuantity: parseInt(quantity),
+        unitPrice: calculatedPrice,
+        totalPrice,
+        savings,
+        savingsPercentage,
+        appliedTier: appliedTier ? {
+          minQuantity: appliedTier.minQuantity,
+          maxQuantity: appliedTier.maxQuantity,
+          pricePerTire: appliedTier.pricePerTire,
+          note: appliedTier.note
+        } : null
+      },
+      allTiers: product.pricingTiers || []
+    });
+
+  } catch (error) {
+    console.error('Get product pricing error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Get product SEO metadata
+ * GET /api/products/:productId/seo
+ */
+const getProductSEO = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const product = await findProductByRouteId(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    // Generate default SEO data if not provided
+    const seoTitle = product.metadata?.seoTitle ||
+      `${product.name} - ${product.brand} ${product.tireSpecs?.size || ''} Tire | Asian Import Export`;
+
+    const seoDescription = product.metadata?.seoDescription ||
+      product.shortDescription ||
+      `${product.brand} ${product.name} tire. ${product.tireSpecs?.size || ''} size, ${product.tireSpecs?.loadIndex || ''} load index, ${product.tireSpecs?.speedRating || ''} speed rating. Best for ${product.applicationsList?.join(', ') || 'commercial use'}.`;
+
+    const seoKeywords = product.metadata?.seoKeywords || [
+      product.name,
+      product.brand,
+      product.tireSpecs?.size,
+      `${product.brand} tire`,
+      'commercial tire',
+      product.tireType,
+      ...(product.applicationsList || [])
+    ].filter(Boolean);
+
+    // Generate canonical URL
+    const canonicalUrl = `/products/${product.sourceId || product._id}`;
+
+    // Generate structured data (Schema.org)
+    const structuredData = {
+      "@context": "https://schema.org/",
+      "@type": "Product",
+      "name": product.name,
+      "image": product.image?.url,
+      "description": product.shortDescription || product.description,
+      "sku": product.sku || product.modelNumber,
+      "mpn": product.modelNumber,
+      "brand": {
+        "@type": "Brand",
+        "name": product.brand
+      },
+      "offers": {
+        "@type": "Offer",
+        "priceCurrency": "USD",
+        "price": parseFloat(String(product.offerPrice || product.price || '0').replace(/[^0-9.-]/g, '')),
+        "availability": product.isActive ? "https://schema.org/InStock" : "https://schema.org/OutOfStock"
+      }
+    };
+
+    // Add aggregate rating if exists
+    const reviews = product.userReviews || [];
+    if (reviews.length > 0) {
+      const avgRating = calculateAverageRating(reviews);
+      structuredData.aggregateRating = {
+        "@type": "AggregateRating",
+        "ratingValue": avgRating,
+        "reviewCount": reviews.length
+      };
+    }
+
+    res.json({
+      success: true,
+      seo: {
+        title: seoTitle,
+        description: seoDescription,
+        keywords: seoKeywords.join(', '),
+        canonicalUrl,
+        structuredData,
+        openGraph: {
+          title: seoTitle,
+          description: seoDescription,
+          image: product.image?.url,
+          url: canonicalUrl,
+          type: "product"
+        },
+        twitterCard: {
+          card: "summary_large_image",
+          title: seoTitle,
+          description: seoDescription,
+          image: product.image?.url
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get product SEO error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
 module.exports = {
   uploadMiddleware: upload.single("file"),
   listCategories,
@@ -1758,4 +2590,18 @@ module.exports = {
   normalizeProductPayload,
   mapCategory,
   mapProduct,
+  // Product Details Controllers
+  getProductDetails,
+  getProductQuickView,
+  getProductSpecsTable,
+  getProductReviews,
+  submitProductReview,
+  getProductPricing,
+  getProductSEO,
+
+  // Helper functions (if needed externally)
+  calculateAverageRating,
+  calculateDiscountPercentage,
+  getProductSpecifications,
+  getProductFeatures
 };

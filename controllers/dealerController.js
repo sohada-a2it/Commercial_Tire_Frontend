@@ -2,8 +2,7 @@ const Dealer = require("../models/Dealer");
 
 /* =========================
    ➤ CREATE DEALER
-========================= */ 
-// CREATE
+========================= */
 exports.createDealer = async (req, res) => {
   try {
     const {
@@ -11,8 +10,10 @@ exports.createDealer = async (req, res) => {
       company,
       phone,
       email,
+      website,
       isActive,
       tireBrands,
+      services,
       address,
       lat,
       lng,
@@ -23,60 +24,93 @@ exports.createDealer = async (req, res) => {
       company,
       phone,
       email,
+      website,
       isActive,
       tireBrands,
+      services,
+
+      // ✅ ADDRESS FIXED
       address: {
-        city: address.city,
-        country: address.country,
-        location: {
-          type: "Point",
-          coordinates: [lng, lat], // IMPORTANT ORDER
-        },
+        street: address?.street,
+        area: address?.area,
+        city: address?.city,
+        state: address?.state,
+        country: address?.country,
+        postalCode: address?.postalCode,
+        fullAddress: address?.fullAddress,
+      },
+
+      // ✅ GEO LOCATION (ROOT LEVEL)
+      location: {
+        type: "Point",
+        coordinates: [parseFloat(lng) || 0, parseFloat(lat) || 0],
       },
     });
 
-    res.status(201).json({ success: true, dealer });
+    res.status(201).json({
+      success: true,
+      message: "Dealer created successfully",
+      data: dealer,
+    });
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
 /* =========================
    ➤ GET ALL DEALERS
-   (WITH FILTERS)
 ========================= */
 exports.getDealers = async (req, res) => {
   try {
-    const { city, brand, authorized, search } = req.query;
+    const { city, brand, authorized, search, service, country, limit = 50 } = req.query;
 
     let filter = { isActive: true };
 
-    // City filter
+    // ✅ ADD COUNTRY FILTER - exact match with trim
+    if (country) {
+      console.log("Filtering by country:", country);
+      // Trim the country and do case-insensitive match
+      filter["address.country"] = {
+        $regex: `^${country.trim()}$`,
+        $options: "i"
+      };
+    }
+
     if (city) {
       filter["address.city"] = new RegExp(city, "i");
     }
 
-    // Brand filter
     if (brand) {
       filter.tireBrands = brand;
     }
 
-    // Authorized filter
+    if (service) {
+      filter.services = new RegExp(service, "i");
+    }
+
     if (authorized) {
       filter.isAuthorized = authorized === "true";
     }
 
-    // Text search (name/company/city)
     if (search) {
       filter.$or = [
         { name: new RegExp(search, "i") },
         { company: new RegExp(search, "i") },
         { "address.city": new RegExp(search, "i") },
+        { services: new RegExp(search, "i") },
       ];
     }
 
-    const dealers = await Dealer.find(filter).sort({ createdAt: -1 });
+    console.log("Query filter:", JSON.stringify(filter));
+    const dealers = await Dealer.find(filter)
+      .limit(parseInt(limit))
+      .sort({ createdAt: -1 });
+
+    console.log("Dealers found:", dealers.length);
 
     res.json({
       success: true,
@@ -84,6 +118,7 @@ exports.getDealers = async (req, res) => {
       data: dealers,
     });
   } catch (err) {
+    console.error("Error in getDealers:", err);
     res.status(500).json({
       success: false,
       message: err.message,
@@ -122,9 +157,22 @@ exports.getDealerById = async (req, res) => {
 ========================= */
 exports.updateDealer = async (req, res) => {
   try {
+    const updates = { ...req.body };
+
+    // ✅ GEO FIX during update
+    if (req.body.lat && req.body.lng) {
+      updates.location = {
+        type: "Point",
+        coordinates: [
+          parseFloat(req.body.lng),
+          parseFloat(req.body.lat),
+        ],
+      };
+    }
+
     const dealer = await Dealer.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updates,
       { new: true, runValidators: true }
     );
 
@@ -193,11 +241,15 @@ exports.getNearbyDealers = async (req, res) => {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: [parseFloat(lng), parseFloat(lat)],
+            coordinates: [
+              parseFloat(lng),
+              parseFloat(lat),
+            ],
           },
           $maxDistance: parseInt(distance),
         },
       },
+      isActive: true,
     });
 
     res.json({

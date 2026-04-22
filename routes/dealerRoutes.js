@@ -4,6 +4,13 @@ const router = express.Router();
 const dealerController = require("../controllers/dealerController");
 
 /* =========================
+   🌍 GEO ROUTE (FIRST)
+========================= */
+
+// ✅ MUST be before /:id
+router.get("/near/search", dealerController.getNearbyDealers);
+
+/* =========================
    CRUD ROUTES
 ========================= */
 
@@ -21,11 +28,5 @@ router.put("/:id", dealerController.updateDealer);
 
 // ➤ Delete dealer
 router.delete("/:id", dealerController.deleteDealer);
-
-/* =========================
-   🌍 GEO ROUTE (NEARBY)
-========================= */
-
-router.get("/near/search", dealerController.getNearbyDealers);
 
 module.exports = router;

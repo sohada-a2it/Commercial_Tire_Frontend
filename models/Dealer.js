@@ -7,13 +7,15 @@ const dealerSchema = new mongoose.Schema(
 
     address: {
       street: { type: String, trim: true },
+      area: { type: String, trim: true }, // 👉 NEW (Dhaka-style area)
       city: { type: String, required: true, trim: true },
       state: { type: String, trim: true },
       country: { type: String, required: true, trim: true },
       postalCode: { type: String, trim: true },
+      fullAddress: { type: String, trim: true }, // 👉 NEW (formatted address)
     },
 
-    // 🌍 GEO LOCATION (ROOT LEVEL ONLY)
+    // 🌍 GEO LOCATION
     location: {
       type: {
         type: String,
@@ -29,7 +31,21 @@ const dealerSchema = new mongoose.Schema(
     contactPerson: { type: String, trim: true },
     phone: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
-    website: { type: String, trim: true },
+
+    // 🌐 WEBSITE (improved validation)
+    website: {
+      type: String,
+      trim: true,
+      match: [/^https?:\/\/.+/, "Please use valid URL with http/https"],
+    },
+
+    // 🛠️ SERVICES (NEW)
+    services: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
 
     tireBrands: [{ type: String, trim: true }],
     serviceAreas: [{ type: String, trim: true }],
@@ -75,6 +91,8 @@ dealerSchema.index({
   name: "text",
   company: "text",
   "address.city": "text",
+  "address.area": "text", // 👉 added
+  services: "text", // 👉 searchable services
 });
 
 module.exports = mongoose.model("Dealer", dealerSchema);

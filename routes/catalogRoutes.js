@@ -64,7 +64,7 @@ router.delete("/products/:productId", authenticate, requireAdmin, deleteProduct)
 router.get("/public/products/:productId", getProduct);
 
 // ==================== TIRE FINDER & COMPARISON (Public Routes) ====================
-router.get("/tires/finder", findTiresByCriteria);
+router.get("/tires/find", findTiresByCriteria);
 router.post("/tires/compare", compareTires);
 
 // ==================== B2B INQUIRY (Public - No Auth Required) ====================

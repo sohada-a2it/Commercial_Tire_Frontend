@@ -1,3 +1,5 @@
+// const dns = require('dns');
+// dns.setServers(['8.8.8.8', '1.1.1.1']);
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -19,7 +21,7 @@ const GENERAL_CONTACT_EMAIL =
   process.env.SMTP_USER ||
   process.env.SALES_EMAIL ||
   "info@asianimportexport.com";
-const SALES_EMAIL = process.env.SMTP_USER || process.env.SALES_EMAIL || "sale@asianimportexport.com";
+const SALES_EMAIL = process.env.PRODUCT_SALES_EMAIL || process.env.SMTP_USER || process.env.SALES_EMAIL || "sale@asianimportexport.com";
 
 const resolveSmtpHost = (rawHost, userEmail) => {
   const host = String(rawHost || "").trim().toLowerCase();
@@ -32,7 +34,6 @@ const resolveSmtpHost = (rawHost, userEmail) => {
 
   if (!host || host.includes("@")) return "";
 
-  // If only the website domain is given (e.g. asianimportexport.com), convert to a usable SMTP host.
   const looksLikePlainDomain = host.includes(".") && !host.startsWith("smtp.") && !host.startsWith("mail.");
   if (looksLikePlainDomain) {
     if (host === "asianimportexport.com" || domain === "asianimportexport.com") {
@@ -44,17 +45,43 @@ const resolveSmtpHost = (rawHost, userEmail) => {
   return host;
 };
 
-const createMailTransporter = () => {
-  const user = String(process.env.SMTP_USER || process.env.OWNER_EMAIL || "").trim();
-  const rawPassword = String(process.env.SMTP_PASSWORD || "");
+// General Inquiry SMTP Transporter
+const createGeneralMailTransporter = () => {
+  const user = String(process.env.GENERAL_SMTP_USER || process.env.SMTP_USER || process.env.OWNER_EMAIL || "").trim();
+  const rawPassword = String(process.env.GENERAL_SMTP_PASSWORD || process.env.SMTP_PASSWORD || "");
   let pass = rawPassword.trim();
-  const host = resolveSmtpHost(process.env.SMTP_HOST, user);
-  const port = Number(process.env.SMTP_PORT || 465);
+  const host = resolveSmtpHost(process.env.GENERAL_SMTP_HOST || process.env.SMTP_HOST, user);
+  const port = Number(process.env.GENERAL_SMTP_PORT || process.env.SMTP_PORT || 465);
   const domain = user.split("@")[1]?.toLowerCase() || "";
   const secure = port === 465;
   const relaxTlsForHost = host === "mail.asianimportexport.com";
 
-  // Gmail app passwords are often copied with spaces; other providers may require spaces.
+  if (domain === "gmail.com") {
+    pass = pass.replace(/\s+/g, "");
+  }
+
+  if (!user || !pass || !host) return null;
+
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+    tls: relaxTlsForHost ? { rejectUnauthorized: false } : undefined,
+  });
+};
+
+// Product Inquiry SMTP Transporter
+const createProductMailTransporter = () => {
+  const user = String(process.env.PRODUCT_SMTP_USER || process.env.SMTP_USER || process.env.OWNER_EMAIL || "").trim();
+  const rawPassword = String(process.env.PRODUCT_SMTP_PASSWORD || process.env.SMTP_PASSWORD || "");
+  let pass = rawPassword.trim();
+  const host = resolveSmtpHost(process.env.PRODUCT_SMTP_HOST || process.env.SMTP_HOST, user);
+  const port = Number(process.env.PRODUCT_SMTP_PORT || process.env.SMTP_PORT || 465);
+  const domain = user.split("@")[1]?.toLowerCase() || "";
+  const secure = port === 465;
+  const relaxTlsForHost = host === "mail.asianimportexport.com";
+
   if (domain === "gmail.com") {
     pass = pass.replace(/\s+/g, "");
   }
@@ -76,7 +103,6 @@ seedDefaultAdmin();
 
 app.use(
   cors({
-    // Reflect request origin and allow all origins.
     origin: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -93,8 +119,47 @@ app.use("/api/catalog", catalogRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/featured-products", featuredProductRoutes);
 app.use("/api/dealers", dealerRoutes);
-
 app.use("/api/blogs", blogRoutes);
+
+// Test SMTP endpoint
+app.get("/api/test-smtp", async (req, res) => {
+  const generalTransporter = createGeneralMailTransporter();
+  const productTransporter = createProductMailTransporter();
+  
+  const results = {
+    general: { 
+      configured: !!generalTransporter,
+      user: process.env.GENERAL_SMTP_USER || process.env.SMTP_USER || "not set"
+    },
+    product: { 
+      configured: !!productTransporter,
+      user: process.env.PRODUCT_SMTP_USER || process.env.SMTP_USER || "not set"
+    }
+  };
+  
+  if (generalTransporter) {
+    try {
+      await generalTransporter.verify();
+      results.general.working = true;
+    } catch (err) {
+      results.general.working = false;
+      results.general.error = err.message;
+    }
+  }
+  
+  if (productTransporter) {
+    try {
+      await productTransporter.verify();
+      results.product.working = true;
+    } catch (err) {
+      results.product.working = false;
+      results.product.error = err.message;
+    }
+  }
+  
+  res.json(results);
+});
+
 // Email endpoint
 app.post("/api/send-email", async (req, res) => {
   const {
@@ -108,10 +173,38 @@ app.post("/api/send-email", async (req, res) => {
     model,
     type,
     subject,
-    shippingTerm, // optional
+    shippingTerm,
+    productName,
+    deliveryLocation,
+    urgentRequirement,
   } = req.body;
 
-  const transporter = createMailTransporter();
+  // Choose transporter based on inquiry type
+  let transporter;
+  let senderAddress;
+  let adminRecipient;
+
+  const isProductInquiry = type === "product_inquiry";
+
+  if (isProductInquiry) {
+    transporter = createProductMailTransporter();
+    // Fallback to general if product SMTP not configured
+    if (!transporter) {
+      console.log("Product SMTP not configured, falling back to general SMTP");
+      transporter = createGeneralMailTransporter();
+      senderAddress = process.env.GENERAL_SMTP_USER || process.env.SMTP_USER || GENERAL_CONTACT_EMAIL;
+    } else {
+      senderAddress = process.env.PRODUCT_SMTP_USER || process.env.SMTP_USER || GENERAL_CONTACT_EMAIL;
+    }
+    adminRecipient = process.env.PRODUCT_SALES_EMAIL || SALES_EMAIL;
+  } else {
+    transporter = createGeneralMailTransporter();
+    if (!transporter) {
+      return res.status(500).json({ error: "SMTP is not configured" });
+    }
+    senderAddress = process.env.GENERAL_SMTP_USER || process.env.SMTP_USER || GENERAL_CONTACT_EMAIL;
+    adminRecipient = GENERAL_CONTACT_EMAIL;
+  }
 
   if (!transporter) {
     return res.status(500).json({ error: "SMTP is not configured" });
@@ -120,15 +213,19 @@ app.post("/api/send-email", async (req, res) => {
   try {
     let emailSubject, textContent, htmlContent;
 
-    if (type === "product_inquiry") {
-      // Product inquiry (from ContactModal)
-      emailSubject = `Product Inquiry: ${model} (${quantity} units)`;
+    if (isProductInquiry) {
+      // Product inquiry
+      emailSubject = `Product Inquiry: ${productName || model}${model ? ` (${model})` : ''} (${quantity || 'N/A'} units)`;
 
       textContent = `
         PRODUCT INQUIRY
         ================
-        Product: ${model}
-        Quantity: ${quantity} units
+        Product Details:
+        Product Name: ${productName || model || "N/A"}
+        Model: ${model || "N/A"}
+        Quantity: ${quantity || 'N/A'} units
+        Delivery Location: ${deliveryLocation || "Not provided"}
+        Urgent: ${urgentRequirement ? "YES" : "NO"}
         Shipping Terms: ${shippingTerm || "Not provided"}
         ----------------------------
         Customer Details:
@@ -141,22 +238,24 @@ app.post("/api/send-email", async (req, res) => {
         Customer Message:
         ${message}
         ================
-              `;
+      `;
 
       htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
           <h2 style="color: #e67e22; border-bottom: 2px solid #e67e22; padding-bottom: 5px;">
-            PRODUCT INQUIRY
+            🔔 NEW PRODUCT INQUIRY
           </h2>
-
-          <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
-            <h3 style="margin-top: 0;">
-              <strong>Product:</strong> ${model}<br>
-              <strong>Quantity:</strong> ${quantity} units<br>
+          <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 10px 0; color: #92400e;">Product Information</h3>
+            <p style="margin: 5px 0;">
+              <strong>Product Name:</strong> ${productName || model || "N/A"}<br>
+              <strong>Model:</strong> ${model || "N/A"}<br>
+              <strong>Quantity:</strong> ${quantity || 'N/A'} units<br>
+              <strong>Delivery Location:</strong> ${deliveryLocation || "Not provided"}<br>
+              <strong>Urgency:</strong> <span style="color: ${urgentRequirement ? '#dc2626' : '#10b981'}">${urgentRequirement ? '🚨 URGENT' : 'Normal'}</span><br>
               <strong>Shipping Terms:</strong> ${shippingTerm || "Not provided"}
-            </h3>
+            </p>
           </div>
-
           <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
             <tr style="background: #e67e22; color: white;">
               <th colspan="2" style="padding: 10px; text-align: left;">CUSTOMER DETAILS</th>
@@ -173,28 +272,28 @@ app.post("/api/send-email", async (req, res) => {
               <td style="padding: 10px; border: 1px solid #ddd;"><strong>Phone:</strong></td>
               <td style="padding: 10px; border: 1px solid #ddd;">${phone || "Not provided"}</td>
             </tr>
-            ${
-              company
-                ? `<tr>
-                    <td style="padding: 10px; border: 1px solid #ddd;"><strong>Company:</strong></td>
-                    <td style="padding: 10px; border: 1px solid #ddd;">${company}</td>
-                  </tr>`
-                : ""
-            }
+            ${company ? `
+            <tr>
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Company:</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">${company}</td>
+            </tr>
+            ` : ""}
             <tr>
               <td style="padding: 10px; border: 1px solid #ddd;"><strong>Address:</strong></td>
               <td style="padding: 10px; border: 1px solid #ddd;">${address || "Not provided"}</td>
             </tr>
           </table>
-
           <div style="background: #f5f5f5; padding: 15px; border-radius: 5px;">
             <h4 style="margin-top: 0; color: #e67e22;">CUSTOMER MESSAGE:</h4>
             <p style="white-space: pre-wrap; margin-bottom: 0;">${message}</p>
           </div>
+          <p style="margin-top: 20px; font-size: 12px; color: #666; text-align: center;">
+            This inquiry was submitted from the website inquiry form.
+          </p>
         </div>
       `;
     } else {
-      // General inquiry (from ContactPage)
+      // General inquiry
       emailSubject = subject || "General Inquiry from Website";
       textContent = `
         GENERAL INQUIRY
@@ -208,14 +307,13 @@ app.post("/api/send-email", async (req, res) => {
         Customer Message:
         ${message}
         ================
-              `;
+      `;
 
-        htmlContent = `
+      htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
           <h2 style="color: #e67e22; border-bottom: 2px solid #e67e22; padding-bottom: 5px;">
             GENERAL INQUIRY
           </h2>
-
           <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
             <tr style="background: #e67e22; color: white;">
               <th colspan="2" style="padding: 10px; text-align: left;">CUSTOMER DETAILS</th>
@@ -232,16 +330,13 @@ app.post("/api/send-email", async (req, res) => {
               <td style="padding: 10px; border: 1px solid #ddd;"><strong>Phone:</strong></td>
               <td style="padding: 10px; border: 1px solid #ddd;">${phone || "Not provided"}</td>
             </tr>
-            ${
-              company
-                ? `<tr>
-                    <td style="padding: 10px; border: 1px solid #ddd;"><strong>Company:</strong></td>
-                    <td style="padding: 10px; border: 1px solid #ddd;">${company}</td>
-                  </tr>`
-                : ""
-            }
+            ${company ? `
+            <tr>
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Company:</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">${company}</td>
+            </tr>
+            ` : ""}
           </table>
-
           <div style="background: #f5f5f5; padding: 15px; border-radius: 5px;">
             <h4 style="margin-top: 0; color: #e67e22;">CUSTOMER MESSAGE:</h4>
             <p style="white-space: pre-wrap; margin-bottom: 0;">${message}</p>
@@ -250,15 +345,9 @@ app.post("/api/send-email", async (req, res) => {
       `;
     }
 
-    let senderAddress =
-      process.env.SMTP_USER || process.env.OWNER_EMAIL || GENERAL_CONTACT_EMAIL;
-    const isProductInquiry = type === "product_inquiry";
-    const adminRecipient = isProductInquiry
-      ? SALES_EMAIL
-      : GENERAL_CONTACT_EMAIL || senderAddress;
-
+    // Send admin email
     await transporter.sendMail({
-      from: `"Asian Import Export Co" <${senderAddress}>`,
+      from: `"DoubleCoin " <${senderAddress}>`,
       to: adminRecipient,
       replyTo: email,
       subject: emailSubject,
@@ -266,29 +355,31 @@ app.post("/api/send-email", async (req, res) => {
       html: htmlContent,
     });
 
+    // Send acknowledgment email to customer (only for general inquiries)
     if (!isProductInquiry && email) {
-      const customerAckSubject = "We received your inquiry - Asian Import Export Co";
-      const customerAckText = `Hello ${name || "Customer"},\n\nThank you for contacting Asian Import Export Co. We have received your inquiry and our team will reply soon.\n\nYour message:\n${message || ""}\n\nBest regards,\nAsian Import Export Co`;
-      const customerAckHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-          <h2 style="color: #0f766e; border-bottom: 2px solid #0f766e; padding-bottom: 6px;">Inquiry Received</h2>
-          <p>Hello ${name || "Customer"},</p>
-          <p>Thank you for contacting <strong>Asian Import Export Co</strong>. We have received your inquiry and our team will reply shortly.</p>
-          <div style="background: #f8fafc; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin-top: 14px;">
-            <p style="margin: 0 0 8px 0;"><strong>Your message:</strong></p>
-            <p style="margin: 0; white-space: pre-wrap;">${message || "No message provided."}</p>
+      const generalTransporter = createGeneralMailTransporter();
+      if (generalTransporter) {
+        const customerAckSubject = "We received your inquiry - DoubleCoin ";
+        const customerAckHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+            <h2 style="color: #0f766e; border-bottom: 2px solid #0f766e; padding-bottom: 6px;">Inquiry Received</h2>
+            <p>Hello ${name || "Customer"},</p>
+            <p>Thank you for contacting <strong>DoubleCoin </strong>. We have received your inquiry and our team will reply shortly.</p>
+            <div style="background: #f8fafc; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin-top: 14px;">
+              <p style="margin: 0 0 8px 0;"><strong>Your message:</strong></p>
+              <p style="margin: 0; white-space: pre-wrap;">${message || "No message provided."}</p>
+            </div>
+            <p style="margin-top: 18px;">General contact: <a href="mailto:${GENERAL_CONTACT_EMAIL}" style="color:#0f766e;">${GENERAL_CONTACT_EMAIL}</a></p>
           </div>
-          <p style="margin-top: 18px;">General contact: <a href="mailto:${GENERAL_CONTACT_EMAIL}" style="color:#0f766e;">${GENERAL_CONTACT_EMAIL}</a></p>
-        </div>
-      `;
+        `;
 
-      await transporter.sendMail({
-        from: `"Asian Import Export Co" <${senderAddress}>`,
-        to: email,
-        subject: customerAckSubject,
-        text: customerAckText,
-        html: customerAckHtml,
-      });
+        await generalTransporter.sendMail({
+          from: `"DoubleCoin " <${senderAddress}>`,
+          to: email,
+          subject: customerAckSubject,
+          html: customerAckHtml,
+        });
+      }
     }
 
     res.status(200).json({ success: true });
@@ -302,7 +393,7 @@ app.post("/api/send-email", async (req, res) => {
 app.post("/api/send-invoice", async (req, res) => {
   const { customer, items, subtotal, total, orderDate, paymentMethod } = req.body;
 
-  const transporter = createMailTransporter();
+  const transporter = createGeneralMailTransporter();
 
   if (!transporter) {
     return res.status(500).json({ error: "SMTP is not configured" });
@@ -315,7 +406,6 @@ app.post("/api/send-invoice", async (req, res) => {
       timeStyle: "short",
     });
 
-    // Generate items HTML
     const itemsHTML = items
       .map(
         (item) => `
@@ -329,14 +419,12 @@ app.post("/api/send-invoice", async (req, res) => {
       )
       .join("");
 
-    // Email to customer
     const customerEmailHTML = `
       <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; background: #fff; border: 1px solid #ddd;">
         <div style="background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%); padding: 30px; text-align: center;">
           <h1 style="color: white; margin: 0; font-size: 28px;">Order Confirmation</h1>
           <p style="color: #e0f2f1; margin: 10px 0 0 0;">Thank you for your order!</p>
         </div>
-
         <div style="padding: 30px;">
           <div style="background: #f0fdfa; border-left: 4px solid #14b8a6; padding: 15px; margin-bottom: 25px;">
             <h2 style="margin: 0 0 10px 0; color: #0d9488;">Order Details</h2>
@@ -346,7 +434,6 @@ app.post("/api/send-invoice", async (req, res) => {
               <strong>Payment Method:</strong> ${paymentMethod === "credit-card" ? "Credit Card" : "Bank Transfer"}
             </p>
           </div>
-
           <h3 style="color: #0d9488; border-bottom: 2px solid #14b8a6; padding-bottom: 10px;">Shipping Information</h3>
           <table style="width: 100%; margin-bottom: 25px;">
             <tr>
@@ -372,7 +459,6 @@ app.post("/api/send-invoice", async (req, res) => {
             </tr>
             ` : ""}
           </table>
-
           <h3 style="color: #0d9488; border-bottom: 2px solid #14b8a6; padding-bottom: 10px;">Order Items</h3>
           <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
             <thead>
@@ -397,7 +483,6 @@ app.post("/api/send-invoice", async (req, res) => {
               </tr>
             </tfoot>
           </table>
-
           <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 25px 0;">
             <h4 style="margin: 0 0 10px 0; color: #92400e;">Next Steps</h4>
             <p style="margin: 5px 0; color: #78350f;">
@@ -410,10 +495,9 @@ app.post("/api/send-invoice", async (req, res) => {
               If you have any questions, please don't hesitate to contact us via WhatsApp or email.
             </p>
           </div>
-
           <div style="text-align: center; padding: 20px; background: #f9fafb; border-radius: 5px; margin-top: 25px;">
             <p style="margin: 0; color: #666; font-size: 14px;">
-              Thank you for choosing Asian Import Export Co<br>
+              Thank you for choosing DoubleCoin <br>
               <a href="tel:14379003996" style="color: #0d9488; text-decoration: none;">+1 (437) 900-3996</a> | 
               <a href="mailto:${process.env.OWNER_EMAIL}" style="color: #0d9488; text-decoration: none;">${process.env.OWNER_EMAIL}</a>
             </p>
@@ -422,14 +506,12 @@ app.post("/api/send-invoice", async (req, res) => {
       </div>
     `;
 
-    // Email to owner/admin
     const adminEmailHTML = `
       <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; background: #fff; border: 1px solid #ddd;">
         <div style="background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); padding: 30px; text-align: center;">
           <h1 style="color: white; margin: 0; font-size: 28px;">🔔 New Order Received</h1>
           <p style="color: #fecaca; margin: 10px 0 0 0;">Order ID: ${orderId}</p>
         </div>
-
         <div style="padding: 30px;">
           <div style="background: #fef2f2; border-left: 4px solid #dc2626; padding: 15px; margin-bottom: 25px;">
             <h2 style="margin: 0 0 10px 0; color: #dc2626;">Order Information</h2>
@@ -439,7 +521,6 @@ app.post("/api/send-invoice", async (req, res) => {
               <strong>Total Amount:</strong> $${total.toFixed(2)} USD
             </p>
           </div>
-
           <h3 style="color: #dc2626; border-bottom: 2px solid #ef4444; padding-bottom: 10px;">Customer Information</h3>
           <table style="width: 100%; margin-bottom: 25px; background: #f9fafb; padding: 15px;">
             <tr>
@@ -465,7 +546,6 @@ app.post("/api/send-invoice", async (req, res) => {
             </tr>
             ` : ""}
           </table>
-
           <h3 style="color: #dc2626; border-bottom: 2px solid #ef4444; padding-bottom: 10px;">Order Items</h3>
           <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
             <thead>
@@ -490,7 +570,6 @@ app.post("/api/send-invoice", async (req, res) => {
               </tr>
             </tfoot>
           </table>
-
           <div style="background: #dbeafe; border-left: 4px solid #3b82f6; padding: 15px; margin: 25px 0;">
             <h4 style="margin: 0 0 10px 0; color: #1e40af;">Action Required</h4>
             <p style="margin: 5px 0; color: #1e3a8a;">
@@ -503,17 +582,17 @@ app.post("/api/send-invoice", async (req, res) => {
       </div>
     `;
 
-    // Send email to customer
+    const senderAddress = process.env.GENERAL_SMTP_USER || process.env.SMTP_USER;
+
     await transporter.sendMail({
-      from: `"Asian Import Export Co" <${process.env.SMTP_USER}>`,
+      from: `"DoubleCoin " <${senderAddress}>`,
       to: customer.email,
       subject: `Order Confirmation - ${orderId}`,
       html: customerEmailHTML,
     });
 
-    // Send email to sales (admin)
     await transporter.sendMail({
-      from: `"Website Orders" <${process.env.SMTP_USER}>`,
+      from: `"Website Orders" <${senderAddress}>`,
       to: SALES_EMAIL,
       subject: `🔔 New Order Received - ${orderId} - $${total.toFixed(2)}`,
       html: adminEmailHTML,

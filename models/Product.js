@@ -1,4 +1,4 @@
-// models/Product.js - CORRECTED VERSION
+// models/Product.js - WITH productCode
 
 const mongoose = require("mongoose");
 const Counter = require("./Counter");
@@ -80,10 +80,12 @@ const assetSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// Tire Technical Specifications Schema
-// tireSpecsSchema এ যোগ করুন:
+// Tire Technical Specifications Schema - WITH productCode
 const tireSpecsSchema = new mongoose.Schema(
   {
+    // ✅ Product Code added here
+    productCode: { type: String, trim: true, default: "" },  // প্রতিটি সাইজের জন্য আলাদা পণ্য কোড
+    
     size: { type: String, trim: true, default: "" },
     loadIndex: { type: String, trim: true, default: "" },
     speedRating: { type: String, trim: true, default: "" },
@@ -97,29 +99,28 @@ const tireSpecsSchema = new mongoose.Schema(
     treadDepth: { type: String, trim: true, default: "" },
     revsPerKm: { type: String, trim: true, default: "" },
     
-    // ========== নতুন ফিল্ড ==========
     loadRange: { 
       type: String, 
       trim: true, 
       enum: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'L'],
       default: "" 
-    },  // Load Range (G, H, J, L etc.)
+    },
     
-    singleMaxLoad: { type: String, trim: true, default: "" },  // Single Max Load
-    singleMaxPressure: { type: String, trim: true, default: "" },  // Single Max Pressure (psi)
+    singleMaxLoad: { type: String, trim: true, default: "" },
+    singleMaxPressure: { type: String, trim: true, default: "" },
     
-    dualMaxLoad: { type: String, trim: true, default: "" },  // Dual Max Load
-    dualMaxPressure: { type: String, trim: true, default: "" },  // Dual Max Pressure (psi)
+    dualMaxLoad: { type: String, trim: true, default: "" },
+    dualMaxPressure: { type: String, trim: true, default: "" },
     
-    staticLoadRadius: { type: String, trim: true, default: "" },  // Static Load Radius (inch)
-    weight: { type: String, trim: true, default: "" },  // Weight (lbs/kg)
+    staticLoadRadius: { type: String, trim: true, default: "" },
+    weight: { type: String, trim: true, default: "" },
     weightUnit: { type: String, enum: ['lbs', 'kg'], default: 'lbs' },
     
     constructionType: { 
       type: String, 
       enum: ['TL', 'TT', 'Both'],
       default: 'TL' 
-    },  // Tire construction: TL (Tubeless) or TT (Tube Type)
+    },
   },
   { _id: false }
 );
@@ -143,13 +144,13 @@ const productSchema = new mongoose.Schema(
     // Basic Info
     name: { type: String, required: true, trim: true }, 
     modelNumber: { type: String, trim: true, default: "" },
+    
     // Categorization
     category: { type: mongoose.Schema.Types.ObjectId, ref: "Category", required: true, index: true },
     mainCategory: { type: String, trim: true, default: "" }, 
     categoryName: { type: String, trim: true, default: "" },   
     
-    // Tire Classification - HYBRID APPROACH
-    // Single string for efficient indexing (used for main filtering)
+    // Tire Classification
     tireType: { 
       type: String, 
       enum: ['steer', 'drive', 'trailer', 'all-position', 'off-road', 'mining'],
@@ -157,7 +158,6 @@ const productSchema = new mongoose.Schema(
       index: true 
     },
     
-    // Single string for primary vehicle type (indexed)
     primaryVehicleType: { 
       type: String, 
       enum: ['truck', 'bus', 'otr', 'industrial', 'mining', 'agricultural', 'mixed'],
@@ -165,7 +165,6 @@ const productSchema = new mongoose.Schema(
       index: true 
     },
     
-    // Single string for primary application (indexed)
     primaryApplication: { 
       type: String,
       enum: ['highway', 'regional', 'mixed-service', 'off-road', 'mining', 'port', 'construction'],
@@ -173,12 +172,11 @@ const productSchema = new mongoose.Schema(
       index: true 
     },
     
-    // Arrays for multi-select support (NOT indexed to avoid parallel array error)
     vehicleTypesList: { type: [String], default: [] },
     applicationsList: { type: [String], default: [] },
     
-    // Technical Specifications
-    tireSpecs: { type: tireSpecsSchema, default: () => ({}) },
+    // Technical Specifications - array of tire specs with productCode
+    tireSpecs: { type: [tireSpecsSchema], default: [] },
     
     // Commercial Info
     pattern: { type: String, trim: true, default: "" },
@@ -228,17 +226,18 @@ const productSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Indexes - No parallel array indexes
-productSchema.index({ category: 1, subcategoryId: 1, createdAt: -1 });
+// Indexes
+productSchema.index({ category: 1, createdAt: -1 });
 productSchema.index({ tireType: 1, primaryVehicleType: 1, primaryApplication: 1 });
 productSchema.index({ isFeatured: 1, isActive: 1 });
 productSchema.index({ name: "text", description: "text", pattern: "text" });
 productSchema.index({ brand: 1 });
 productSchema.index({ pattern: 1 });
+productSchema.index({ "tireSpecs.size": 1 });
+productSchema.index({ "tireSpecs.productCode": 1 }); // ✅ Index for productCode
 
 // Pre-save middleware to sync array fields with single-value fields
 productSchema.pre("save", function syncArrayFields(next) {
-  // Sync vehicleTypesList
   if (this.vehicleTypesList && this.vehicleTypesList.length > 0) {
     this.vehicleTypesList = [...new Set(this.vehicleTypesList)];
     if (!this.primaryVehicleType || !this.vehicleTypesList.includes(this.primaryVehicleType)) {
@@ -248,7 +247,6 @@ productSchema.pre("save", function syncArrayFields(next) {
     this.vehicleTypesList = [this.primaryVehicleType];
   }
   
-  // Sync applicationsList
   if (this.applicationsList && this.applicationsList.length > 0) {
     this.applicationsList = [...new Set(this.applicationsList)];
     if (!this.primaryApplication || !this.applicationsList.includes(this.primaryApplication)) {
@@ -285,20 +283,23 @@ productSchema.pre("validate", async function autoAssignSourceId(next) {
   }
 });
 
-// Virtual for getting all vehicle types (backward compatibility)
+// Virtuals
 productSchema.virtual("vehicleType").get(function() {
   return this.vehicleTypesList;
 });
 
-// Virtual for getting all applications (backward compatibility)
 productSchema.virtual("application").get(function() {
   return this.applicationsList;
 });
 
-// Virtual for full tire name
 productSchema.virtual("fullTireName").get(function() {
-  if (this.pattern && this.tireSpecs?.size) {
-    return `${this.pattern} ${this.tireSpecs.size}`;
+  if (this.pattern) {
+    const uniqueSizes = [...new Set(this.tireSpecs.map(s => s.size))];
+    if (uniqueSizes.length === 1) {
+      return `${this.pattern} ${uniqueSizes[0]}`;
+    } else if (uniqueSizes.length > 1) {
+      return `${this.pattern} (Multiple Sizes)`;
+    }
   }
   return this.name;
 });
@@ -317,7 +318,16 @@ productSchema.methods.matchesFilter = function(filters) {
     if (!applications.includes(filters.application)) return false;
   }
   
-  if (filters.size && this.tireSpecs.size !== filters.size) return false;
+  if (filters.size) {
+    const hasSize = this.tireSpecs.some(spec => spec.size === filters.size);
+    if (!hasSize) return false;
+  }
+  
+  if (filters.productCode) {
+    const hasProductCode = this.tireSpecs.some(spec => spec.productCode === filters.productCode);
+    if (!hasProductCode) return false;
+  }
+  
   return true;
 };
 
@@ -325,25 +335,12 @@ productSchema.methods.matchesFilter = function(filters) {
 productSchema.statics.findByTireCriteria = async function(criteria) {
   const filter = { isActive: true };
   
-  if (criteria.tireType) {
-    filter.tireType = criteria.tireType;
-  }
-  
-  if (criteria.vehicleType) {
-    filter.vehicleTypesList = { $in: [criteria.vehicleType] };
-  }
-  
-  if (criteria.application) {
-    filter.applicationsList = { $in: [criteria.application] };
-  }
-  
-  if (criteria.size) {
-    filter['tireSpecs.size'] = { $regex: criteria.size, $options: 'i' };
-  }
-  
-  if (criteria.brand) {
-    filter.brand = { $regex: criteria.brand, $options: 'i' };
-  }
+  if (criteria.tireType) filter.tireType = criteria.tireType;
+  if (criteria.vehicleType) filter.vehicleTypesList = { $in: [criteria.vehicleType] };
+  if (criteria.application) filter.applicationsList = { $in: [criteria.application] };
+  if (criteria.size) filter['tireSpecs.size'] = { $regex: criteria.size, $options: 'i' };
+  if (criteria.productCode) filter['tireSpecs.productCode'] = { $regex: criteria.productCode, $options: 'i' };
+  if (criteria.brand) filter.brand = { $regex: criteria.brand, $options: 'i' };
   
   return this.find(filter).limit(criteria.limit || 20);
 };

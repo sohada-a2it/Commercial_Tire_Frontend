@@ -241,7 +241,7 @@ const normalizeProductPayload = (payload = {}) => {
     primaryVehicleType: getPrimaryValue(payload.primaryVehicleType || payload.vehicleType, 'truck'),
     primaryApplication: getPrimaryValue(payload.primaryApplication || payload.application, 'highway'),
 
-    tireSpecs: payload.tireSpecs || {},
+    tireSpecs: Array.isArray(payload.tireSpecs) ? payload.tireSpecs : (payload.tireSpecs ? [payload.tireSpecs] : []),
     resources: payload.resources || {},
     videoUrl: String(payload.videoUrl || "").trim(),
     threeSixtyImages: Array.isArray(payload.threeSixtyImages) ? payload.threeSixtyImages.map((item) => normalizeAsset(item)) : [],
@@ -399,29 +399,29 @@ const mapProduct = (product) => {
     vehicleTypesList: Array.isArray(productData.vehicleTypesList) ? productData.vehicleTypesList : [],
     applicationsList: Array.isArray(productData.applicationsList) ? productData.applicationsList : [],
 
-    tireSpecs: {
-      size: productData.tireSpecs?.size || "",
-      loadIndex: productData.tireSpecs?.loadIndex || "",
-      speedRating: productData.tireSpecs?.speedRating || "",
-      treadPattern: productData.tireSpecs?.treadPattern || "",
-      plyRating: productData.tireSpecs?.plyRating || "",
-      loadRange: productData.tireSpecs?.loadRange || "",
-      stdRim: productData.tireSpecs?.stdRim || "",
-      overallDiameter: productData.tireSpecs?.overallDiameter || "",
-      sectionWidth: productData.tireSpecs?.sectionWidth || "",
-      treadDepth: productData.tireSpecs?.treadDepth || "",
-      maxLoad: productData.tireSpecs?.maxLoad || "",
-      maxInflation: productData.tireSpecs?.maxInflation || "",
-      constructionType: productData.tireSpecs?.constructionType || "",
-      singleMaxLoad: productData.tireSpecs?.singleMaxLoad || "",
-      singleMaxPressure: productData.tireSpecs?.singleMaxPressure || "",
-      dualMaxLoad: productData.tireSpecs?.dualMaxLoad || "",
-      dualMaxPressure: productData.tireSpecs?.dualMaxPressure || "",
-      staticLoadRadius: productData.tireSpecs?.staticLoadRadius || "",
-      weight: productData.tireSpecs?.weight || "",
-      weightUnit: productData.tireSpecs?.weightUnit || "lbs",
-      revsPerKm: productData.tireSpecs?.revsPerKm || "",
-    },
+    tireSpecs: Array.isArray(productData.tireSpecs) ? productData.tireSpecs.map(spec => ({
+  size: spec?.size || "",
+  loadIndex: spec?.loadIndex || "",
+  speedRating: spec?.speedRating || "",
+  treadPattern: spec?.treadPattern || "",
+  plyRating: spec?.plyRating || "",
+  loadRange: spec?.loadRange || "",
+  stdRim: spec?.stdRim || "",
+  overallDiameter: spec?.overallDiameter || "",
+  sectionWidth: spec?.sectionWidth || "",
+  treadDepth: spec?.treadDepth || "",
+  maxLoad: spec?.maxLoad || "",
+  maxInflation: spec?.maxInflation || "",
+  constructionType: spec?.constructionType || "",
+  singleMaxLoad: spec?.singleMaxLoad || "",
+  singleMaxPressure: spec?.singleMaxPressure || "",
+  dualMaxLoad: spec?.dualMaxLoad || "",
+  dualMaxPressure: spec?.dualMaxPressure || "",
+  staticLoadRadius: spec?.staticLoadRadius || "",
+  weight: spec?.weight || "",
+  weightUnit: spec?.weightUnit || "lbs",
+  revsPerKm: spec?.revsPerKm || "",
+})) : [],
 
     resources: productData.resources || {},
     videoUrl: productData.videoUrl || "",
@@ -1057,25 +1057,55 @@ const deleteProduct = async (req, res) => {
 
 const getRecommendationReason = (tire, criteria) => {
   const reasons = [];
+  
+  // Vehicle type match
+  if (criteria.vehicleTypesList && tire.vehicleTypesList?.includes(criteria.vehicleTypesList)) {
+    reasons.push('✓ Designed for your vehicle type');
+  }
+  
+  // Road type match
   if (criteria.roadType === 'highway' && tire.applicationsList?.includes('highway')) {
-    reasons.push('Optimized for highway fuel efficiency');
+    reasons.push('✓ Optimized for highway fuel efficiency & longevity');
   }
   if (criteria.roadType === 'mixed' && tire.applicationsList?.includes('mixed-service')) {
-    reasons.push('Designed for mixed on/off-road conditions');
+    reasons.push('✓ Designed for mixed on/off-road conditions');
   }
   if (criteria.roadType === 'off-road' && (tire.applicationsList?.includes('off-road') || tire.applicationsList?.includes('mining'))) {
-    reasons.push('Heavy-duty off-road construction for maximum durability');
+    reasons.push('✓ Heavy-duty construction for maximum durability');
   }
-  if (criteria.loadWeight === 'heavy' && tire.tireSpecs?.loadIndex >= 150) {
-    reasons.push('Heavy load capacity suitable for your requirements');
+  if (criteria.roadType === 'mining' && tire.applicationsList?.includes('mining')) {
+    reasons.push('✓ Specialized for mining & extreme conditions');
   }
-  if (criteria.loadWeight === 'light' && tire.tireSpecs?.loadIndex < 140) {
-    reasons.push('Light load rating matches your fleet needs');
+  
+  // Load capacity match
+  const loadIndex = parseInt(tire.tireSpecs?.loadIndex) || 0;
+  if (criteria.loadWeight === 'light' && loadIndex < 140) {
+    reasons.push('✓ Perfect for light-duty applications');
   }
-  if (criteria.vehicleTypesList === 'truck' && tire.vehicleTypesList?.includes('truck')) {
-    reasons.push('Specifically designed for truck applicationsLists');
+  if (criteria.loadWeight === 'medium' && loadIndex >= 140 && loadIndex < 150) {
+    reasons.push('✓ Ideal for medium-load commercial use');
   }
-  return reasons.join('. ') || 'Recommended based on your criteria';
+  if (criteria.loadWeight === 'heavy' && loadIndex >= 150 && loadIndex < 160) {
+    reasons.push('✓ Rated for heavy-duty loads');
+  }
+  if (criteria.loadWeight === 'extra-heavy' && loadIndex >= 160) {
+    reasons.push('✓ Maximum load capacity for extreme conditions');
+  }
+  
+  // Quality indicators
+  if (tire.isBestSeller) {
+    reasons.push('⭐ Popular choice among commercial operators');
+  }
+  if (tire.isFeatured) {
+    reasons.push('⭐ Featured product - excellent rating');
+  }
+  
+  // Fallback message
+  if (reasons.length === 0) {
+    reasons.push('Recommended based on your search criteria');
+  }
+  
+  return reasons.join(' • ');
 };
 
 const findTiresByCriteria = async (req, res) => {
@@ -1090,37 +1120,71 @@ const findTiresByCriteria = async (req, res) => {
 
     const filter = { isActive: true };
 
+    // Filter by vehicle type
     if (vehicleTypesList) {
       filter.vehicleTypesList = { $in: [vehicleTypesList] };
     }
 
-    if (roadType === 'highway') {
-      filter.applicationsList = { $in: ['highway', 'regional'] };
-    } else if (roadType === 'mixed') {
-      filter.applicationsList = { $in: ['mixed-service', 'regional'] };
-    } else if (roadType === 'off-road') {
-      filter.applicationsList = { $in: ['off-road', 'mining', 'construction'] };
+    // Filter by road type/application
+    if (roadType) {
+      const applicationMap = {
+        'highway': ['highway', 'regional'],
+        'mixed': ['mixed-service', 'regional'],
+        'off-road': ['off-road', 'mining', 'construction'],
+        'mining': ['mining', 'off-road']
+      };
+      
+      const applications = applicationMap[roadType];
+      if (applications) {
+        filter.applicationsList = { $in: applications };
+      }
     }
 
-    if (loadWeight === 'heavy') {
-      filter['tireSpecs.loadIndex'] = { $gte: '150' };
-    } else if (loadWeight === 'medium') {
-      filter['tireSpecs.loadIndex'] = { $gte: '140', $lte: '149' };
+    // Filter by load weight - based on tire load index ratings
+    if (loadWeight) {
+      const loadIndexMap = {
+        'light': { $lt: 140 },           // Load index < 140
+        'medium': { $gte: 140, $lt: 150 }, // 140-149
+        'heavy': { $gte: 150, $lt: 160 }, // 150-159
+        'extra-heavy': { $gte: 160 }      // 160+
+      };
+      
+      const loadIndexFilter = loadIndexMap[loadWeight];
+      if (loadIndexFilter) {
+        filter['tireSpecs.loadIndex'] = loadIndexFilter;
+      }
     }
 
+    // Filter by tire size if specified
     if (tireSize) {
       filter['tireSpecs.size'] = { $regex: tireSize, $options: 'i' };
     }
 
+    // Additional application filter if provided directly
     if (applicationsList) {
       filter.applicationsList = { $in: [applicationsList] };
     }
 
+    // Find matching tires, sorted by best match score
     const recommendedTires = await Product.find(filter)
-      .limit(10)
+      .sort({ isFeatured: -1, isBestSeller: -1, createdAt: -1 })
+      .limit(12)
       .populate('category');
 
-    const results = recommendedTires.map(tire => ({
+    // If no results with strict filters, try broader search
+    let results = recommendedTires;
+    if (results.length === 0 && loadWeight) {
+      // Try without load weight filter
+      const broaderFilter = { ...filter };
+      delete broaderFilter['tireSpecs.loadIndex'];
+      results = await Product.find(broaderFilter)
+        .sort({ isFeatured: -1, isBestSeller: -1, createdAt: -1 })
+        .limit(12)
+        .populate('category');
+    }
+
+    // Map results and add recommendation reasons
+    const mappedResults = results.map(tire => ({
       ...mapProduct(tire),
       recommendationReason: getRecommendationReason(tire, { vehicleTypesList, roadType, loadWeight })
     }));
@@ -1128,11 +1192,17 @@ const findTiresByCriteria = async (req, res) => {
     res.json({
       success: true,
       criteria: { vehicleTypesList, roadType, loadWeight, tireSize, applicationsList },
-      recommendations: results,
-      total: results.length
+      recommendations: mappedResults,
+      total: mappedResults.length,
+      message: mappedResults.length === 0 ? 'No tires found. Try adjusting your criteria.' : undefined
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Error in findTiresByCriteria:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error finding tires. Please try again.',
+      error: error.message 
+    });
   }
 };
 
@@ -1912,7 +1982,9 @@ const getProductSpecifications = (product) => {
   if (product.modelNumber) specs.push({ label: "Model Number", value: product.modelNumber });
 
   // Tire specifications
-  const tireSpecs = product.tireSpecs || {};
+  const tireSpecs = Array.isArray(product.tireSpecs) && product.tireSpecs.length > 0 
+  ? product.tireSpecs[0]   
+  : {};
   if (tireSpecs.size) specs.push({ label: "Tire Size", value: tireSpecs.size });
   if (tireSpecs.loadIndex) specs.push({ label: "Load Index", value: tireSpecs.loadIndex });
   if (tireSpecs.speedRating) specs.push({ label: "Speed Rating", value: tireSpecs.speedRating });
@@ -2124,7 +2196,9 @@ const getRelatedProducts = async (product, limit = 6) => {
  * @returns {Array} Array of similar products
  */
 const getSimilarBySize = async (product, limit = 4) => {
-  const tireSize = product.tireSpecs?.size;
+  const tireSize = Array.isArray(product.tireSpecs) && product.tireSpecs.length > 0 
+  ? product.tireSpecs[0].size 
+  : null;
   if (!tireSize) return [];
 
   const similar = await Product.find({

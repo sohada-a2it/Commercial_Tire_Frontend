@@ -1,5 +1,5 @@
-// const dns = require('dns');
-// dns.setServers(['8.8.8.8', '1.1.1.1']);
+const dns = require('dns');
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -120,7 +120,7 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/featured-products", featuredProductRoutes);
 app.use("/api/dealers", dealerRoutes);
 app.use("/api/blogs", blogRoutes);
-
+app.use('/api/categories', categoryRoutes);
 // Test SMTP endpoint
 app.get("/api/test-smtp", async (req, res) => {
   const generalTransporter = createGeneralMailTransporter();
@@ -179,35 +179,27 @@ app.post("/api/send-email", async (req, res) => {
     urgentRequirement,
   } = req.body;
 
-  // Choose transporter based on inquiry type
+  // Choose recipient and use general transporter for all (avoids SMTP auth issues)
   let transporter;
   let senderAddress;
   let adminRecipient;
 
   const isProductInquiry = type === "product_inquiry";
 
-  if (isProductInquiry) {
-    transporter = createProductMailTransporter();
-    // Fallback to general if product SMTP not configured
-    if (!transporter) {
-      console.log("Product SMTP not configured, falling back to general SMTP");
-      transporter = createGeneralMailTransporter();
-      senderAddress = process.env.GENERAL_SMTP_USER || process.env.SMTP_USER || GENERAL_CONTACT_EMAIL;
-    } else {
-      senderAddress = process.env.PRODUCT_SMTP_USER || process.env.SMTP_USER || GENERAL_CONTACT_EMAIL;
-    }
-    adminRecipient = process.env.PRODUCT_SALES_EMAIL || SALES_EMAIL;
-  } else {
-    transporter = createGeneralMailTransporter();
-    if (!transporter) {
-      return res.status(500).json({ error: "SMTP is not configured" });
-    }
-    senderAddress = process.env.GENERAL_SMTP_USER || process.env.SMTP_USER || GENERAL_CONTACT_EMAIL;
-    adminRecipient = GENERAL_CONTACT_EMAIL;
-  }
-
+  // Always use the working general transporter
+  transporter = createGeneralMailTransporter();
   if (!transporter) {
     return res.status(500).json({ error: "SMTP is not configured" });
+  }
+
+  // Set sender address to match authenticated user
+  senderAddress = process.env.GENERAL_SMTP_USER || process.env.SMTP_USER || GENERAL_CONTACT_EMAIL;
+
+  // Route to appropriate admin email based on inquiry type
+  if (isProductInquiry) {
+    adminRecipient = process.env.PRODUCT_SALES_EMAIL || SALES_EMAIL;
+  } else {
+    adminRecipient = GENERAL_CONTACT_EMAIL;
   }
 
   try {
@@ -355,21 +347,40 @@ app.post("/api/send-email", async (req, res) => {
       html: htmlContent,
     });
 
-    // Send acknowledgment email to customer (only for general inquiries)
-    if (!isProductInquiry && email) {
+    // Send acknowledgment email to customer (for both general and product inquiries)
+    if (email) {
       const generalTransporter = createGeneralMailTransporter();
       if (generalTransporter) {
-        const customerAckSubject = "We received your inquiry - DoubleCoin ";
+        const customerAckSubject = isProductInquiry 
+          ? "Thank you for your product inquiry - DoubleCoin "
+          : "We received your inquiry - DoubleCoin ";
+        
         const customerAckHtml = `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-            <h2 style="color: #0f766e; border-bottom: 2px solid #0f766e; padding-bottom: 6px;">Inquiry Received</h2>
+            <h2 style="color: #0f766e; border-bottom: 2px solid #0f766e; padding-bottom: 6px;">
+              ${isProductInquiry ? "Product Inquiry Received" : "Inquiry Received"}
+            </h2>
             <p>Hello ${name || "Customer"},</p>
-            <p>Thank you for contacting <strong>DoubleCoin </strong>. We have received your inquiry and our team will reply shortly.</p>
-            <div style="background: #f8fafc; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin-top: 14px;">
-              <p style="margin: 0 0 8px 0;"><strong>Your message:</strong></p>
-              <p style="margin: 0; white-space: pre-wrap;">${message || "No message provided."}</p>
+            <p>Thank you for ${isProductInquiry ? "your product inquiry" : "contacting"} <strong>DoubleCoin </strong>. We have received your ${isProductInquiry ? "inquiry" : "message"} and our sales team will reply shortly.</p>
+            ${isProductInquiry ? `
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; border-radius: 6px; margin: 15px 0;">
+              <p style="margin: 0 0 8px 0;"><strong>Product Details:</strong></p>
+              <p style="margin: 5px 0;"><strong>Product:</strong> ${productName || model || "N/A"}</p>
+              <p style="margin: 5px 0;"><strong>Quantity:</strong> ${quantity || "N/A"} units</p>
             </div>
-            <p style="margin-top: 18px;">General contact: <a href="mailto:${GENERAL_CONTACT_EMAIL}" style="color:#0f766e;">${GENERAL_CONTACT_EMAIL}</a></p>
+            ` : ""}
+            <div style="background: #f8fafc; border: 1px solid #e5e7eb; padding: 12px; border-radius: 6px; margin-top: 14px;">
+              <p style="margin: 0 0 8px 0;"><strong>${isProductInquiry ? "Your message:" : "Your inquiry:"}</strong></p>
+              <p style="margin: 0; white-space: pre-wrap; font-size: 13px;">${message || "No message provided."}</p>
+            </div>
+            <div style="background: #f0f9ff; border: 1px solid #bfdbfe; padding: 12px; border-radius: 6px; margin-top: 15px;">
+              <p style="margin: 0; font-size: 12px; color: #1e40af;">
+                <strong>📧 Next Steps:</strong> Our team will review your inquiry and contact you within 24 hours.
+              </p>
+            </div>
+            <p style="margin-top: 18px; font-size: 12px; color: #666;">
+              For immediate assistance, contact us: <a href="mailto:${GENERAL_CONTACT_EMAIL}" style="color:#0f766e;">${GENERAL_CONTACT_EMAIL}</a>
+            </p>
           </div>
         `;
 

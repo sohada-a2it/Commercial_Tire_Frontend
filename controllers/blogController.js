@@ -4,7 +4,7 @@ const fs = require("fs/promises");
 const path = require("path");
 const { cloudinary, buildOptimizedUrl } = require("../config/cloudinary");
 const multer = require("multer");
-
+const Category = require("../models/categoryModel");
 // Multer configuration for multiple files
 const upload = multer({ storage: multer.memoryStorage() });
 // Add this helper function in your blogController.js (if not already present)
@@ -119,7 +119,37 @@ const normalizeNumber = (value) => {
     const parsed = Number(String(value || "").replace(/[^0-9.-]/g, ""));
     return Number.isFinite(parsed) ? parsed : 0;
 };
-
+// ✅ ক্যাটাগরি প্রসেস করার হেল্পার ফাংশন
+const processCategory = async (categoryInput) => {
+    if (!categoryInput || categoryInput === 'uncategorized') {
+        return { categoryId: null, categoryName: 'uncategorized' };
+    }
+    
+    // চেক করুন এটি valid ObjectId কিনা
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(categoryInput);
+    
+    if (isValidObjectId) {
+        const category = await Category.findById(categoryInput);
+        if (category) {
+            return { categoryId: category._id, categoryName: category.displayName };
+        }
+    }
+    
+    // নাম দিয়ে খুঁজুন
+    const category = await Category.findOne({ 
+        $or: [
+            { name: categoryInput.toLowerCase() },
+            { displayName: categoryInput }
+        ]
+    });
+    
+    if (category) {
+        return { categoryId: category._id, categoryName: category.displayName };
+    }
+    
+    // না পেলে স্ট্রিং হিসেবে রিটার্ন করুন (ব্যাকওয়ার্ড কম্প্যাটিবিলিটির জন্য)
+    return { categoryId: null, categoryName: categoryInput };
+};
 // ✅ CREATE BLOG with all new features
 exports.createBlog = async (req, res) => {
     try {
@@ -134,7 +164,7 @@ exports.createBlog = async (req, res) => {
         if (!title) {
             return res.status(400).json({ success: false, message: "Blog title is required" });
         }
-
+       const { categoryId, categoryName } = await processCategory(category);
         // Process cover image
         let coverImage = null;
         if (req.files?.coverImage && req.files.coverImage[0]) {
@@ -260,7 +290,8 @@ exports.createBlog = async (req, res) => {
         const blog = await Blog.create({
             title, slug, content,
             excerpt: excerpt || content.substring(0, 200),
-            category: category || 'uncategorized',
+            category: categoryId,        // ✅ ObjectId হিসেবে সংরক্ষণ
+            categoryName: categoryName,  // ✅ ডিসপ্লে নাম
             tags: parsedTags || [],
             coverImage,
             galleryImages: galleryImagesList,
@@ -302,7 +333,25 @@ exports.getBlogs = async (req, res) => {
 
         const filter = {};
 
-        if (category && category !== 'all') filter.category = category;
+         if (category && category !== 'all') {
+            const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(category);
+            
+            if (isValidObjectId) {
+                filter.category = category;
+            } else {
+                const categoryDoc = await Category.findOne({ 
+                    $or: [
+                        { name: category.toLowerCase() },
+                        { displayName: category }
+                    ]
+                });
+                if (categoryDoc) {
+                    filter.category = categoryDoc._id;
+                } else {
+                    filter.categoryName = category;
+                }
+            }
+        }
         if (tag) filter.tags = tag;
         if (isPublished !== undefined) filter.isPublished = isPublished === 'true';
         if (status) filter.status = status;
@@ -327,13 +376,16 @@ exports.getBlogs = async (req, res) => {
 
         const [blogs, total] = await Promise.all([
             Blog.find(filter)
+             .populate('category', 'name displayName slug')
                 .sort({ isFeatured: -1, featuredPriority: -1, publishedAt: -1, createdAt: -1 })
                 .skip(skip)
                 .limit(parseInt(limit)),
             Blog.countDocuments(filter)
         ]);
 
-        const allCategories = await Blog.distinct('category');
+        const allCategories = await Category.find({ isActive: true })
+            .select('name displayName slug parentCategory order')
+            .sort({ order: 1, name: 1 });
         const allTags = await Blog.distinct('tags');
         const flatTags = [...new Set(allTags.flat())];
 
@@ -355,8 +407,8 @@ exports.getBlogs = async (req, res) => {
 // ✅ GET SINGLE BLOG
 exports.getSingleBlog = async (req, res) => {
     try {
-        const blog = await Blog.findOne({ slug: req.params.slug });
-
+        const blog = await Blog.findById(req.params.id)
+            .populate('category', 'name displayName slug');
         if (!blog) {
             return res.status(404).json({ success: false, message: "Blog not found" });
         }
@@ -394,7 +446,11 @@ exports.updateBlog = async (req, res) => {
         }
 
         const updateData = { ...req.body };
-
+ if (req.body.category !== undefined) {
+            const { categoryId, categoryName } = await processCategory(req.body.category);
+            updateData.category = categoryId;
+            updateData.categoryName = categoryName;
+        }
         // Update slug if title changed
         if (req.body.title && req.body.title !== blog.title) {
             let newSlug = slugify(req.body.title, { lower: true, strict: true });
@@ -680,6 +736,316 @@ exports.getBlogStats = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+exports.getCategories = async (req, res) => {
+    try {
+        const { includeInactive = false, parent = null, limit = 50 } = req.query;
+        
+        const filter = {};
+        if (includeInactive !== 'true') filter.isActive = true;
+        if (parent === 'null' || parent === '') filter.parentCategory = null;
+        else if (parent) filter.parentCategory = parent;
+        
+        const categories = await Category.find(filter)
+            .sort({ order: 1, name: 1 })
+            .limit(parseInt(limit))
+            .populate('parentCategory', 'name displayName slug');
+        
+        // Get post count for each category
+        const categoriesWithCount = await Promise.all(
+            categories.map(async (category) => {
+                const postCount = await Blog.countDocuments({ 
+                    category: category._id,
+                    status: 'published',
+                    isPublished: true 
+                });
+                return { ...category.toObject(), postCount };
+            })
+        );
+        
+        res.status(200).json({
+            success: true,
+            count: categoriesWithCount.length,
+            categories: categoriesWithCount
+        });
+    } catch (error) {
+        console.error('Get categories error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
 
+// @desc    Get single category by ID
+// @route   GET /api/categories/:id
+// @access  Public
+exports.getCategoryById = async (req, res) => {
+    try {
+        const category = await Category.findById(req.params.id)
+            .populate('parentCategory', 'name displayName slug');
+        
+        if (!category) {
+            return res.status(404).json({ success: false, message: 'Category not found' });
+        }
+        
+        const postCount = await Blog.countDocuments({ 
+            category: category._id,
+            status: 'published',
+            isPublished: true 
+        });
+        
+        res.status(200).json({
+            success: true,
+            category: { ...category.toObject(), postCount }
+        });
+    } catch (error) {
+        console.error('Get category error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// @desc    Get category by slug with blogs
+// @route   GET /api/categories/slug/:slug/blogs
+// @access  Public
+exports.getCategoryBySlug = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        const category = await Category.findOne({ slug: req.params.slug, isActive: true });
+        
+        if (!category) {
+            return res.status(404).json({ success: false, message: 'Category not found' });
+        }
+        
+        const blogs = await Blog.find({ 
+            category: category._id,
+            status: 'published',
+            isPublished: true 
+        })
+            .sort({ publishedAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit))
+            .select('title slug excerpt coverImage publishedAt views readTime author');
+        
+        const totalBlogs = await Blog.countDocuments({ 
+            category: category._id,
+            status: 'published',
+            isPublished: true 
+        });
+        
+        res.status(200).json({
+            success: true,
+            category,
+            blogs,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: totalBlogs,
+                totalPages: Math.ceil(totalBlogs / parseInt(limit))
+            }
+        });
+    } catch (error) {
+        console.error('Get category by slug error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// @desc    Create new category
+// @route   POST /api/categories
+// @access  Private (Admin only)
+exports.createCategory = async (req, res) => {
+    try {
+        const { name, displayName, description, parentCategory, order, isActive } = req.body;
+        
+        if (!name || !displayName) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Name and display name are required' 
+            });
+        }
+        
+        // Check if category already exists
+        const existingCategory = await Category.findOne({ name: name.toLowerCase() });
+        if (existingCategory) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Category with this name already exists' 
+            });
+        }
+        
+        // Generate slug
+        let slug = slugify(name, { lower: true, strict: true });
+        let existingSlug = await Category.findOne({ slug });
+        let counter = 1;
+        while (existingSlug) {
+            slug = `${slugify(name, { lower: true, strict: true })}-${counter}`;
+            existingSlug = await Category.findOne({ slug });
+            counter++;
+        }
+        
+        const category = await Category.create({
+            name: name.toLowerCase(),
+            displayName,
+            slug,
+            description: description || '',
+            parentCategory: parentCategory || null,
+            order: order || 0,
+            isActive: isActive !== undefined ? isActive : true
+        });
+        
+        res.status(201).json({
+            success: true,
+            category,
+            message: 'Category created successfully'
+        });
+    } catch (error) {
+        console.error('Create category error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// @desc    Update category
+// @route   PUT /api/categories/:id
+// @access  Private (Admin only)
+exports.updateCategory = async (req, res) => {
+    try {
+        const { name, displayName, description, parentCategory, order, isActive } = req.body;
+        
+        const category = await Category.findById(req.params.id);
+        if (!category) {
+            return res.status(404).json({ success: false, message: 'Category not found' });
+        }
+        
+        // Update slug if name changed
+        if (name && name !== category.name) {
+            const existingCategory = await Category.findOne({ 
+                name: name.toLowerCase(), 
+                _id: { $ne: category._id } 
+            });
+            if (existingCategory) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Category with this name already exists' 
+                });
+            }
+            
+            let newSlug = slugify(name, { lower: true, strict: true });
+            let existingSlug = await Category.findOne({ slug: newSlug, _id: { $ne: category._id } });
+            let counter = 1;
+            while (existingSlug) {
+                newSlug = `${slugify(name, { lower: true, strict: true })}-${counter}`;
+                existingSlug = await Category.findOne({ slug: newSlug, _id: { $ne: category._id } });
+                counter++;
+            }
+            category.slug = newSlug;
+            category.name = name.toLowerCase();
+        }
+        
+        if (displayName) category.displayName = displayName;
+        if (description !== undefined) category.description = description;
+        if (parentCategory !== undefined) category.parentCategory = parentCategory;
+        if (order !== undefined) category.order = order;
+        if (isActive !== undefined) category.isActive = isActive;
+        
+        await category.save();
+        
+        res.status(200).json({
+            success: true,
+            category,
+            message: 'Category updated successfully'
+        });
+    } catch (error) {
+        console.error('Update category error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// @desc    Delete category
+// @route   DELETE /api/categories/:id
+// @access  Private (Admin only)
+exports.deleteCategory = async (req, res) => {
+    try {
+        const category = await Category.findById(req.params.id);
+        
+        if (!category) {
+            return res.status(404).json({ success: false, message: 'Category not found' });
+        }
+        
+        // Check if any blogs use this category
+        const blogsCount = await Blog.countDocuments({ category: category._id });
+        if (blogsCount > 0) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Cannot delete category. ${blogsCount} blog(s) are using this category.` 
+            });
+        }
+        
+        await category.deleteOne();
+        
+        res.status(200).json({
+            success: true,
+            message: 'Category deleted successfully'
+        });
+    } catch (error) {
+        console.error('Delete category error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// @desc    Get category tree (hierarchical)
+// @route   GET /api/categories/tree
+// @access  Public
+exports.getCategoryTree = async (req, res) => {
+    try {
+        const categories = await Category.find({ isActive: true })
+            .sort({ order: 1, name: 1 });
+        
+        const buildTree = (parentId = null, level = 0) => {
+            return categories
+                .filter(cat => {
+                    const catParentId = cat.parentCategory ? cat.parentCategory.toString() : null;
+                    return catParentId === parentId;
+                })
+                .map(cat => ({
+                    ...cat.toObject(),
+                    level,
+                    children: buildTree(cat._id.toString(), level + 1)
+                }));
+        };
+        
+        const tree = buildTree();
+        
+        res.status(200).json({
+            success: true,
+            categories: tree
+        });
+    } catch (error) {
+        console.error('Get category tree error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// @desc    Get category statistics
+// @route   GET /api/categories/stats
+// @access  Public
+exports.getCategoryStats = async (req, res) => {
+    try {
+        const totalCategories = await Category.countDocuments();
+        const activeCategories = await Category.countDocuments({ isActive: true });
+        const parentCategories = await Category.countDocuments({ parentCategory: null });
+        const subCategories = await Category.countDocuments({ parentCategory: { $ne: null } });
+        
+        res.status(200).json({
+            success: true,
+            stats: {
+                totalCategories,
+                activeCategories,
+                parentCategories,
+                subCategories
+            }
+        });
+    } catch (error) {
+        console.error('Get category stats error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
 // Export multer for file upload handling
 exports.upload = upload;

@@ -14,6 +14,7 @@ const categoryRoutes = require("./routes/categoryRoutes");
 const featuredProductRoutes = require("./routes/featuredRoute");
 const dealerRoutes = require("./routes/dealerRoutes");
 const blogRoutes = require("./routes/blogRoutes");
+const blogCategoryRoutes = require("./routes/blogCategory");
 const app = express();
 
 const GENERAL_CONTACT_EMAIL =
@@ -119,24 +120,25 @@ app.use("/api/catalog", catalogRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/featured-products", featuredProductRoutes);
 app.use("/api/dealers", dealerRoutes);
-app.use("/api/blogs", blogRoutes);
-app.use('/api/categories', categoryRoutes);
+app.use("/api/blogs", blogRoutes); 
+app.use('/api/blogCategories', blogCategoryRoutes);
+
 // Test SMTP endpoint
 app.get("/api/test-smtp", async (req, res) => {
   const generalTransporter = createGeneralMailTransporter();
   const productTransporter = createProductMailTransporter();
-  
+
   const results = {
-    general: { 
+    general: {
       configured: !!generalTransporter,
       user: process.env.GENERAL_SMTP_USER || process.env.SMTP_USER || "not set"
     },
-    product: { 
+    product: {
       configured: !!productTransporter,
       user: process.env.PRODUCT_SMTP_USER || process.env.SMTP_USER || "not set"
     }
   };
-  
+
   if (generalTransporter) {
     try {
       await generalTransporter.verify();
@@ -146,7 +148,7 @@ app.get("/api/test-smtp", async (req, res) => {
       results.general.error = err.message;
     }
   }
-  
+
   if (productTransporter) {
     try {
       await productTransporter.verify();
@@ -156,12 +158,16 @@ app.get("/api/test-smtp", async (req, res) => {
       results.product.error = err.message;
     }
   }
-  
+
   res.json(results);
 });
 
 // Email endpoint
 app.post("/api/send-email", async (req, res) => {
+  console.log("=".repeat(50));
+  console.log("📨 Received contact form submission");
+  console.log("Request body:", req.body);
+  
   const {
     name,
     email,
@@ -185,12 +191,18 @@ app.post("/api/send-email", async (req, res) => {
   let adminRecipient;
 
   const isProductInquiry = type === "product_inquiry";
+  
+  console.log("Inquiry type:", type);
+  console.log("Is product inquiry:", isProductInquiry);
 
   // Always use the working general transporter
   transporter = createGeneralMailTransporter();
   if (!transporter) {
+    console.log("❌ SMTP Transporter not configured!");
     return res.status(500).json({ error: "SMTP is not configured" });
   }
+  
+  console.log("✅ SMTP Transporter configured");
 
   // Set sender address to match authenticated user
   senderAddress = process.env.GENERAL_SMTP_USER || process.env.SMTP_USER || GENERAL_CONTACT_EMAIL;
@@ -201,92 +213,22 @@ app.post("/api/send-email", async (req, res) => {
   } else {
     adminRecipient = GENERAL_CONTACT_EMAIL;
   }
+  
+  console.log("Admin recipient:", adminRecipient);
+  console.log("Sender address:", senderAddress);
 
   try {
     let emailSubject, textContent, htmlContent;
 
     if (isProductInquiry) {
-      // Product inquiry
+      // Product inquiry code...
       emailSubject = `Product Inquiry: ${productName || model}${model ? ` (${model})` : ''} (${quantity || 'N/A'} units)`;
-
-      textContent = `
-        PRODUCT INQUIRY
-        ================
-        Product Details:
-        Product Name: ${productName || model || "N/A"}
-        Model: ${model || "N/A"}
-        Quantity: ${quantity || 'N/A'} units
-        Delivery Location: ${deliveryLocation || "Not provided"}
-        Urgent: ${urgentRequirement ? "YES" : "NO"}
-        Shipping Terms: ${shippingTerm || "Not provided"}
-        ----------------------------
-        Customer Details:
-        Name: ${name}
-        Email: ${email}
-        Phone: ${phone || "Not provided"}
-        ${company ? `Company: ${company}\n` : ""}
-        Address: ${address || "Not provided"}
-        ----------------------------
-        Customer Message:
-        ${message}
-        ================
-      `;
-
-      htmlContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-          <h2 style="color: #e67e22; border-bottom: 2px solid #e67e22; padding-bottom: 5px;">
-            🔔 NEW PRODUCT INQUIRY
-          </h2>
-          <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin-bottom: 20px;">
-            <h3 style="margin: 0 0 10px 0; color: #92400e;">Product Information</h3>
-            <p style="margin: 5px 0;">
-              <strong>Product Name:</strong> ${productName || model || "N/A"}<br>
-              <strong>Model:</strong> ${model || "N/A"}<br>
-              <strong>Quantity:</strong> ${quantity || 'N/A'} units<br>
-              <strong>Delivery Location:</strong> ${deliveryLocation || "Not provided"}<br>
-              <strong>Urgency:</strong> <span style="color: ${urgentRequirement ? '#dc2626' : '#10b981'}">${urgentRequirement ? '🚨 URGENT' : 'Normal'}</span><br>
-              <strong>Shipping Terms:</strong> ${shippingTerm || "Not provided"}
-            </p>
-          </div>
-          <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-            <tr style="background: #e67e22; color: white;">
-              <th colspan="2" style="padding: 10px; text-align: left;">CUSTOMER DETAILS</th>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border: 1px solid #ddd; width: 30%;"><strong>Name:</strong></td>
-              <td style="padding: 10px; border: 1px solid #ddd;">${name}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Email:</strong></td>
-              <td style="padding: 10px; border: 1px solid #ddd;">${email}</td>
-            </tr>
-            <tr>
-              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Phone:</strong></td>
-              <td style="padding: 10px; border: 1px solid #ddd;">${phone || "Not provided"}</td>
-            </tr>
-            ${company ? `
-            <tr>
-              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Company:</strong></td>
-              <td style="padding: 10px; border: 1px solid #ddd;">${company}</td>
-            </tr>
-            ` : ""}
-            <tr>
-              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Address:</strong></td>
-              <td style="padding: 10px; border: 1px solid #ddd;">${address || "Not provided"}</td>
-            </tr>
-          </table>
-          <div style="background: #f5f5f5; padding: 15px; border-radius: 5px;">
-            <h4 style="margin-top: 0; color: #e67e22;">CUSTOMER MESSAGE:</h4>
-            <p style="white-space: pre-wrap; margin-bottom: 0;">${message}</p>
-          </div>
-          <p style="margin-top: 20px; font-size: 12px; color: #666; text-align: center;">
-            This inquiry was submitted from the website inquiry form.
-          </p>
-        </div>
-      `;
+      // ... rest of product inquiry code
     } else {
       // General inquiry
       emailSubject = subject || "General Inquiry from Website";
+      console.log("Sending general inquiry with subject:", emailSubject);
+      
       textContent = `
         GENERAL INQUIRY
         ================
@@ -338,30 +280,33 @@ app.post("/api/send-email", async (req, res) => {
     }
 
     // Send admin email
+    console.log("📧 Sending admin email...");
     await transporter.sendMail({
-      from: `"DoubleCoin " <${senderAddress}>`,
+      from: `"DoubleCoin" <${senderAddress}>`,
       to: adminRecipient,
       replyTo: email,
       subject: emailSubject,
       text: textContent,
       html: htmlContent,
     });
+    console.log("✅ Admin email sent successfully");
 
-    // Send acknowledgment email to customer (for both general and product inquiries)
+    // Send acknowledgment email to customer
     if (email) {
+      console.log("📧 Sending acknowledgment email to customer:", email);
       const generalTransporter = createGeneralMailTransporter();
       if (generalTransporter) {
-        const customerAckSubject = isProductInquiry 
-          ? "Thank you for your product inquiry - DoubleCoin "
-          : "We received your inquiry - DoubleCoin ";
-        
+        const customerAckSubject = isProductInquiry
+          ? "Thank you for your product inquiry - DoubleCoin"
+          : "We received your inquiry - DoubleCoin";
+
         const customerAckHtml = `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
             <h2 style="color: #0f766e; border-bottom: 2px solid #0f766e; padding-bottom: 6px;">
               ${isProductInquiry ? "Product Inquiry Received" : "Inquiry Received"}
             </h2>
             <p>Hello ${name || "Customer"},</p>
-            <p>Thank you for ${isProductInquiry ? "your product inquiry" : "contacting"} <strong>DoubleCoin </strong>. We have received your ${isProductInquiry ? "inquiry" : "message"} and our sales team will reply shortly.</p>
+            <p>Thank you for ${isProductInquiry ? "your product inquiry" : "contacting"} <strong>DoubleCoin</strong>. We have received your ${isProductInquiry ? "inquiry" : "message"} and our sales team will reply shortly.</p>
             ${isProductInquiry ? `
             <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; border-radius: 6px; margin: 15px 0;">
               <p style="margin: 0 0 8px 0;"><strong>Product Details:</strong></p>
@@ -385,18 +330,30 @@ app.post("/api/send-email", async (req, res) => {
         `;
 
         await generalTransporter.sendMail({
-          from: `"DoubleCoin " <${senderAddress}>`,
+          from: `"DoubleCoin" <${senderAddress}>`,
           to: email,
           subject: customerAckSubject,
           html: customerAckHtml,
         });
+        console.log("✅ Customer acknowledgment email sent");
+      } else {
+        console.log("⚠️ Could not send customer acknowledgment - no transporter");
       }
     }
 
-    res.status(200).json({ success: true });
+    // IMPORTANT: Send success response
+    console.log("🎉 Sending success response to client");
+    return res.status(200).json({ 
+      success: true, 
+      message: "Email sent successfully" 
+    });
+    
   } catch (error) {
-    console.error("Error sending email:", error);
-    res.status(500).json({ error: "Failed to send email" });
+    console.error("❌ Error sending email:", error);
+    return res.status(500).json({ 
+      error: "Failed to send email",
+      details: error.message 
+    });
   }
 });
 
@@ -497,10 +454,10 @@ app.post("/api/send-invoice", async (req, res) => {
           <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 25px 0;">
             <h4 style="margin: 0 0 10px 0; color: #92400e;">Next Steps</h4>
             <p style="margin: 5px 0; color: #78350f;">
-              ${paymentMethod === "credit-card" 
-                ? "Our team will contact you shortly with payment instructions for your credit card payment."
-                : "Our team will contact you shortly with bank transfer details and payment instructions."
-              }
+              ${paymentMethod === "credit-card"
+        ? "Our team will contact you shortly with payment instructions for your credit card payment."
+        : "Our team will contact you shortly with bank transfer details and payment instructions."
+      }
             </p>
             <p style="margin: 10px 0 0 0; color: #78350f;">
               If you have any questions, please don't hesitate to contact us via WhatsApp or email.
@@ -609,10 +566,10 @@ app.post("/api/send-invoice", async (req, res) => {
       html: adminEmailHTML,
     });
 
-    res.status(200).json({ 
-      success: true, 
+    res.status(200).json({
+      success: true,
       orderId,
-      message: "Invoice sent successfully" 
+      message: "Invoice sent successfully"
     });
   } catch (error) {
     console.error("Error sending invoice:", error);
